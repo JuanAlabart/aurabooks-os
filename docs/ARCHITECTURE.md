@@ -59,9 +59,20 @@
    * Parses raw `struct input_event` into clean, debounced gestures:
      * `EVENT_TAP`, `EVENT_DOUBLE_TAP`, `EVENT_LONG_PRESS`, `EVENT_SWIPE_LEFT`, `EVENT_SWIPE_RIGHT`.
 3. **`aura_font.c / .h` (Vector Typography Engine)**
-   * Links against `libfreetype2`.
+   * Uses single-header `stb_truetype.h` (pure C, zero external runtime shared library dependencies).
+   * Eliminates dynamic linking crashes on Kindle's older `glibc 2.12.2`.
    * Loads high-contrast serif font (`Literata-Regular.ttf`, `Literata-Bold.ttf`, `Literata-Italic.ttf`).
-   * Renders subpixel-antialiased glyphs directly into the 8-bit grayscale pixel buffer.
+   * Renders subpixel-antialiased glyphs directly into the 8-bit grayscale pixel buffer with alpha blending.
+
+4. **`aura_image.c / .h` (High-Quality Image Engine)**
+   * Uses single-header `stb_image.h` for JPEG, PNG, and BMP cover art decoding.
+   * Employs box-filter downsampling for smooth cover scaling.
+   * Implements Floyd-Steinberg 16-level grayscale dithering to eliminate posterization on E-Ink panels.
+
+5. **`aura_power.c / .h` (Battery & Power Subsystem)**
+   * Reads hardware battery percentage and charging state directly from Kindle sysfs (`/sys/devices/system/yoshi_battery/` or `/sys/class/power_supply/`).
+   * Provides current clock time for header display.
+   * Supports low-power device sleep (`/sys/power/state`).
 
 #### B. UI Framework
 * **`aura_ui.c / .h`**
