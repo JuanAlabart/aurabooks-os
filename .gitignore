@@ -1,0 +1,15 @@
+# Build output
+*.o
+*.a
+*.so
+aurabooks_bin
+aurabooks_sim
+
+# Toolchains and temp
+x-tools/
+build/
+dist/
+.vscode/
+.idea/
+*.swp
+*~

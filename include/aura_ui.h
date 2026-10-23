@@ -1,0 +1,50 @@
+#ifndef AURA_UI_H
+#define AURA_UI_H
+
+#include "aura_fb.h"
+#include "aura_touch.h"
+#include "aura_font.h"
+#include "aura_db.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    AURA_TAB_HOME,
+    AURA_TAB_LIBRARY,
+    AURA_TAB_QUOTES
+} aura_tab_t;
+
+typedef struct {
+    aura_rect_t bounds;
+    const char *text;
+    bool is_active;
+} aura_ui_button_t;
+
+typedef struct {
+    aura_tab_t active_tab;
+    aura_ui_button_t btn_home;
+    aura_ui_button_t btn_library;
+    aura_ui_button_t btn_quotes;
+} aura_ui_navbar_t;
+
+/* High-level View Composers */
+void aura_ui_draw_header(aura_fb_t *fb, const aura_font_t *font, const char *title);
+void aura_ui_draw_navbar(aura_fb_t *fb, const aura_font_t *font, aura_ui_navbar_t *navbar);
+bool aura_ui_navbar_handle_touch(aura_ui_navbar_t *navbar, aura_touch_event_t ev, aura_tab_t *out_new_tab);
+
+void aura_ui_draw_hero_card(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, const aura_book_t *book, int x, int y, int w, int h);
+void aura_ui_draw_quote_card(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, const aura_quote_t *quote, int x, int y, int w, int h);
+void aura_ui_draw_stats_card(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, const aura_db_t *db, int x, int y, int w, int h);
+
+void aura_ui_draw_book_row(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, const aura_book_t *book, int x, int y, int w, int h);
+void aura_ui_draw_quote_row(aura_fb_t *fb, const aura_font_t *font_text, const aura_quote_t *quote, int x, int y, int w, int h);
+
+void aura_ui_draw_progress_bar(aura_fb_t *fb, int x, int y, int w, int h, float percent, uint8_t fill_color, uint8_t border_color);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* AURA_UI_H */
