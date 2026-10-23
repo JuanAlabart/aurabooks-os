@@ -156,13 +156,9 @@ void aura_reader_paginate(aura_reader_doc_t *doc, const aura_font_t *font, int m
     if (!doc || !font || !doc->raw_text || doc->raw_text_len == 0) return;
 
     (void)margin_x; (void)margin_y;
-    int line_h = aura_font_get_height(font) + 4;
+    int line_h = aura_font_get_height(font) + 6;
     int max_lines_per_page = content_h / line_h;
     if (max_lines_per_page <= 0) max_lines_per_page = 20;
-
-    int char_w = 8; /* Font scale 1 */
-    int chars_per_line = content_w / char_w;
-    if (chars_per_line <= 0) chars_per_line = 40;
 
     doc->total_pages = 0;
     doc->page_offsets[doc->total_pages++] = 0;
@@ -175,15 +171,40 @@ void aura_reader_paginate(aura_reader_doc_t *doc, const aura_font_t *font, int m
         int lines = 0;
 
         while (pos < len && lines < max_lines_per_page) {
-            /* Find end of line */
-            int line_chars = 0;
-            while (pos < len && line_chars < chars_per_line && text[pos] != '\n') {
-                pos++;
-                line_chars++;
+            /* Measure how much text fits on this line */
+            char line_buf[512];
+            int line_len = 0;
+            line_buf[0] = '\0';
+
+            while (pos < len && text[pos] != '\n') {
+                /* Find next word */
+                size_t word_start = pos;
+                while (pos < len && !isspace((unsigned char)text[pos])) pos++;
+                int word_len = (int)(pos - word_start);
+
+                char test_buf[512];
+                if (line_len > 0) {
+                    snprintf(test_buf, sizeof(test_buf), "%s %.*s", line_buf, word_len, &text[word_start]);
+                } else {
+                    snprintf(test_buf, sizeof(test_buf), "%.*s", word_len, &text[word_start]);
+                }
+
+                int w = aura_font_measure_string(font, test_buf);
+                if (w > content_w && line_len > 0) {
+                    /* Word overflows line: roll back position and break line */
+                    pos = word_start;
+                    break;
+                }
+
+                snprintf(line_buf, sizeof(line_buf), "%s", test_buf);
+                line_len = (int)strlen(line_buf);
+
+                /* Consume trailing spaces */
+                while (pos < len && text[pos] == ' ') pos++;
             }
 
             if (pos < len && text[pos] == '\n') {
-                pos++; /* Skip newline */
+                pos++; /* Skip explicit newline */
             }
             lines++;
         }
@@ -215,46 +236,94 @@ bool aura_reader_goto_page(aura_reader_doc_t *doc, int page_num) {
     return true;
 }
 
-void aura_reader_render_page(aura_fb_t *fb, const aura_font_t *font, aura_reader_doc_t *doc) {
+void aura_reader_render_page(aura_fb_t *fb, const aura_font_t *font, aura_reader_doc_t *doc, bool show_hud) {
     if (!fb || !font || !doc || !doc->raw_text) return;
 
-    aura_fb_clear(fb, 0xFF); /* Clear screen to paper white */
+    aura_fb_clear(fb, 0xFF); /* Paper white */
 
-    int margin_x = 32;
-    int margin_y = 28;
+    int margin_x = 36;
+    int margin_y = show_hud ? 70 : 36;
+    int footer_h = 36;
     int content_w = SCREEN_WIDTH - (2 * margin_x);
-    int content_h = SCREEN_HEIGHT - (2 * margin_y) - 30; /* 30px footer budget */
-    int line_h = aura_font_get_height(font) + 4;
+    int content_h = SCREEN_HEIGHT - margin_y - footer_h - 10;
+    int line_h = aura_font_get_height(font) + 6;
 
     uint32_t start_offset = doc->page_offsets[doc->current_page - 1];
     uint32_t end_offset = (doc->current_page < doc->total_pages) ? doc->page_offsets[doc->current_page] : (uint32_t)doc->raw_text_len;
 
     /* Render text lines */
     int cur_y = margin_y;
-    const char *text = &doc->raw_text[start_offset];
-    size_t length = end_offset - start_offset;
-    size_t pos = 0;
-    int char_w = 8;
-    int chars_per_line = content_w / char_w;
+    const char *text = doc->raw_text;
+    size_t pos = start_offset;
 
-    char line_buf[128];
+    while (pos < end_offset && cur_y + line_h <= margin_y + content_h) {
+        char line_buf[512];
+        int line_len = 0;
+        line_buf[0] = '\0';
 
-    while (pos < length && cur_y + line_h <= margin_y + content_h) {
-        int line_chars = 0;
-        while (pos < length && line_chars < chars_per_line && line_chars < (int)sizeof(line_buf) - 1 && text[pos] != '\n') {
-            line_buf[line_chars++] = text[pos++];
+        while (pos < end_offset && text[pos] != '\n') {
+            size_t word_start = pos;
+            while (pos < end_offset && !isspace((unsigned char)text[pos])) pos++;
+            int word_len = (int)(pos - word_start);
+
+            char test_buf[512];
+            if (line_len > 0) {
+                snprintf(test_buf, sizeof(test_buf), "%s %.*s", line_buf, word_len, &text[word_start]);
+            } else {
+                snprintf(test_buf, sizeof(test_buf), "%.*s", word_len, &text[word_start]);
+            }
+
+            int w = aura_font_measure_string(font, test_buf);
+            if (w > content_w && line_len > 0) {
+                pos = word_start;
+                break;
+            }
+
+            snprintf(line_buf, sizeof(line_buf), "%s", test_buf);
+            line_len = (int)strlen(line_buf);
+
+            while (pos < end_offset && text[pos] == ' ') pos++;
         }
-        line_buf[line_chars] = '\0';
-        if (pos < length && text[pos] == '\n') pos++;
 
-        aura_font_draw_string(fb, font, line_buf, margin_x, cur_y, 0x00);
-        cur_y += line_h;
+        if (pos < end_offset && text[pos] == '\n') pos++;
+
+        if (line_len > 0) {
+            aura_font_draw_string(fb, font, line_buf, margin_x, cur_y, 0x00);
+            cur_y += line_h;
+        }
     }
 
-    /* Render Bottom Reader Status Line */
-    int footer_y = SCREEN_HEIGHT - 24;
-    char footer_str[64];
+    /* Bottom Reader Status Footer */
+    int footer_y = SCREEN_HEIGHT - 28;
+    char footer_str[128];
     int pct = (doc->total_pages > 0) ? (doc->current_page * 100 / doc->total_pages) : 0;
-    snprintf(footer_str, sizeof(footer_str), "%s  •  Pag. %d de %d (%d%%)", doc->title, doc->current_page, doc->total_pages, pct);
-    aura_font_draw_aligned(fb, font, footer_str, 0, footer_y, SCREEN_WIDTH, AURA_ALIGN_CENTER, 0x66);
+    snprintf(footer_str, sizeof(footer_str), "%s  •  Pagina %d de %d (%d%%)", doc->title, doc->current_page, doc->total_pages, pct);
+    aura_font_draw_aligned(fb, font, footer_str, 0, footer_y, SCREEN_WIDTH, AURA_ALIGN_CENTER, 0x55);
+
+    /* Progress bar at the very bottom */
+    float progress = (doc->total_pages > 0) ? (float)doc->current_page / doc->total_pages : 0.0f;
+    int p_w = (int)(SCREEN_WIDTH * progress);
+    if (p_w > 0) {
+        aura_fb_fill_rect(fb, 0, SCREEN_HEIGHT - 3, p_w, 3, 0x00);
+    }
+
+    /* Optional HUD Overlay on Top */
+    if (show_hud) {
+        /* HUD Top Bar */
+        aura_fb_draw_rounded_rect(fb, 12, 10, SCREEN_WIDTH - 24, 48, 12, 1, 0xFF, 0x00);
+
+        /* [ < Volver ] Button */
+        aura_fb_draw_rounded_rect(fb, 20, 16, 90, 36, 10, 1, 0xFF, 0x00);
+        aura_font_draw_aligned(fb, font, "< Volver", 20, 24, 90, AURA_ALIGN_CENTER, 0x00);
+
+        /* Book Title Centered */
+        aura_font_draw_aligned(fb, font, doc->title, 120, 24, SCREEN_WIDTH - 240, AURA_ALIGN_CENTER, 0x00);
+
+        /* [ A- ] [ A+ ] Size Adjust Buttons */
+        aura_fb_draw_rounded_rect(fb, SCREEN_WIDTH - 110, 16, 40, 36, 8, 1, 0xFF, 0x00);
+        aura_font_draw_aligned(fb, font, "A-", SCREEN_WIDTH - 110, 24, 40, AURA_ALIGN_CENTER, 0x00);
+
+        aura_fb_draw_rounded_rect(fb, SCREEN_WIDTH - 65, 16, 40, 36, 8, 1, 0xFF, 0x00);
+        aura_font_draw_aligned(fb, font, "A+", SCREEN_WIDTH - 65, 24, 40, AURA_ALIGN_CENTER, 0x00);
+    }
 }

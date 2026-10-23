@@ -36,7 +36,7 @@ bool aura_reader_prev_page(aura_reader_doc_t *doc);
 bool aura_reader_goto_page(aura_reader_doc_t *doc, int page_num);
 
 /* Render page to framebuffer */
-void aura_reader_render_page(aura_fb_t *fb, const aura_font_t *font, aura_reader_doc_t *doc);
+void aura_reader_render_page(aura_fb_t *fb, const aura_font_t *font, aura_reader_doc_t *doc, bool show_hud);
 
 #ifdef __cplusplus
 }

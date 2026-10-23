@@ -7,17 +7,29 @@ static bool is_point_in_rect(int px, int py, aura_rect_t r) {
     return (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h);
 }
 
-void aura_ui_draw_header(aura_fb_t *fb, const aura_font_t *font, const char *title) {
-    if (!fb || !font) return;
+void aura_ui_draw_header(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, const char *title, aura_system_status_t status) {
+    if (!fb || !font_title) return;
 
     int y = 14;
 
     /* Draw Header Title */
-    aura_font_draw_string(fb, font, title, 20, y + 6, 0x00);
+    aura_font_draw_string(fb, font_title, title, 20, y + 6, 0x00);
+
+    /* Battery & Clock Info */
+    char status_buf[32];
+    snprintf(status_buf, sizeof(status_buf), "%d%%%s  %s",
+             status.battery_percent,
+             status.is_charging ? " ⚡" : "",
+             status.time_str);
+
+    if (font_text) {
+        int info_w = aura_font_measure_string(font_text, status_buf);
+        aura_font_draw_string(fb, font_text, status_buf, 470 - info_w, y + 9, 0x44);
+    }
 
     /* Draw Settings pill button on top right: 96x32 at x = 488 */
     aura_fb_draw_rounded_rect(fb, 488, y, 96, 32, 10, 1, 0xFF, 0x00);
-    aura_font_draw_aligned(fb, font, "Ajustes", 488, y + 8, 96, AURA_ALIGN_CENTER, 0x00);
+    aura_font_draw_aligned(fb, font_title, "Ajustes", 488, y + 8, 96, AURA_ALIGN_CENTER, 0x00);
 }
 
 void aura_ui_draw_navbar(aura_fb_t *fb, const aura_font_t *font, aura_ui_navbar_t *navbar) {
@@ -106,12 +118,28 @@ void aura_ui_draw_hero_card(aura_fb_t *fb, const aura_font_t *font_title, const 
     /* Book cover thumbnail: 120x175 */
     int cover_x = x + 16;
     int cover_y = y + 16;
-    aura_fb_draw_rounded_rect(fb, cover_x, cover_y, 120, 175, 8, 1, 0xF0, 0x00);
-    aura_font_draw_aligned(fb, font_text, "[ Portada ]", cover_x, cover_y + 80, 120, AURA_ALIGN_CENTER, 0x66);
+    int cover_w = 120;
+    int cover_h = 175;
+
+    bool cover_rendered = false;
+    if (book->cover_path[0] != '\0') {
+        aura_image_t *img = aura_image_load(book->cover_path);
+        if (img) {
+            aura_image_draw_scaled(fb, img, cover_x, cover_y, cover_w, cover_h);
+            aura_fb_draw_rect(fb, cover_x, cover_y, cover_w, cover_h, 1, 0x00);
+            aura_image_free(img);
+            cover_rendered = true;
+        }
+    }
+
+    if (!cover_rendered) {
+        aura_fb_draw_rounded_rect(fb, cover_x, cover_y, cover_w, cover_h, 8, 1, 0xF4, 0x00);
+        aura_font_draw_aligned(fb, font_text, "[ Portada ]", cover_x, cover_y + 80, cover_w, AURA_ALIGN_CENTER, 0x66);
+    }
 
     /* Right column info */
-    int info_x = cover_x + 120 + 16;
-    int info_w = w - (120 + 48);
+    int info_x = cover_x + cover_w + 16;
+    int info_w = w - (cover_w + 48);
 
     /* Badge: "LECTURA EN CURSO" */
     char badge_str[64];
@@ -220,11 +248,29 @@ void aura_ui_draw_book_row(aura_fb_t *fb, const aura_font_t *font_title, const a
     aura_fb_draw_rounded_rect(fb, x, y, w, h, 12, 1, 0xFF, 0x00);
 
     /* Cover thumbnail: 52x74 */
-    aura_fb_draw_rounded_rect(fb, x + 5, y + 5, 52, 74, 4, 1, 0xF0, 0x00);
-    aura_font_draw_aligned(fb, font_text, "Img", x + 5, y + 32, 52, AURA_ALIGN_CENTER, 0x66);
+    int thumb_x = x + 5;
+    int thumb_y = y + 5;
+    int thumb_w = 52;
+    int thumb_h = 74;
+
+    bool cover_rendered = false;
+    if (book->cover_path[0] != '\0') {
+        aura_image_t *img = aura_image_load(book->cover_path);
+        if (img) {
+            aura_image_draw_scaled(fb, img, thumb_x, thumb_y, thumb_w, thumb_h);
+            aura_fb_draw_rect(fb, thumb_x, thumb_y, thumb_w, thumb_h, 1, 0x00);
+            aura_image_free(img);
+            cover_rendered = true;
+        }
+    }
+
+    if (!cover_rendered) {
+        aura_fb_draw_rounded_rect(fb, thumb_x, thumb_y, thumb_w, thumb_h, 4, 1, 0xF4, 0x00);
+        aura_font_draw_aligned(fb, font_text, "Img", thumb_x, thumb_y + 30, thumb_w, AURA_ALIGN_CENTER, 0x66);
+    }
 
     /* Book Info */
-    int info_x = x + 52 + 16;
+    int info_x = x + thumb_w + 16;
     aura_font_draw_string(fb, font_title, book->title, info_x, y + 10, 0x00);
     aura_font_draw_string(fb, font_text, book->author, info_x, y + 34, 0x66);
 
@@ -256,4 +302,42 @@ void aura_ui_draw_quote_row(aura_fb_t *fb, const aura_font_t *font_text, const a
     char author_str[STR_LEN_MED + 8];
     snprintf(author_str, sizeof(author_str), "- %s, %s", quote->author, quote->book);
     aura_font_draw_string(fb, font_text, author_str, x + 14, y + 44 + used_h, 0x44);
+}
+
+void aura_ui_draw_settings_modal(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, bool autoboot_enabled) {
+    if (!fb || !font_title || !font_text) return;
+
+    /* Semi-opaque backdrop shadow */
+    int mw = 480;
+    int mh = 420;
+    int mx = (SCREEN_WIDTH - mw) / 2;
+    int my = (SCREEN_HEIGHT - mh) / 2;
+
+    /* Dialog Box */
+    aura_fb_draw_rounded_rect(fb, mx, my, mw, mh, 16, 2, 0xFF, 0x00);
+
+    /* Modal Title */
+    aura_font_draw_aligned(fb, font_title, "Ajustes de AuraBooks OS", mx, my + 24, mw, AURA_ALIGN_CENTER, 0x00);
+    aura_fb_draw_rect(fb, mx + 30, my + 60, mw - 60, 1, 1, 0xCC);
+
+    /* Section 1: Autoarranque Directo */
+    aura_font_draw_string(fb, font_title, "Autoarranque Directo (Upstart):", mx + 30, my + 80, 0x00);
+    const char *status_str = autoboot_enabled ? "ESTADO: [ ACTIVO - Inicia en AuraBooks ]" : "ESTADO: [ INACTIVO - Inicia en Amazon ]";
+    aura_font_draw_string(fb, font_text, status_str, mx + 30, my + 110, autoboot_enabled ? 0x00 : 0x66);
+
+    /* Toggle Autoboot Button */
+    aura_fb_draw_rounded_rect(fb, mx + 30, my + 140, mw - 60, 44, 10, 1, 0xFF, 0x00);
+    const char *btn_toggle_text = autoboot_enabled ? "Desactivar Autoarranque (Volver a Amazon)" : "Activar Autoarranque Puro AuraBooks";
+    aura_font_draw_aligned(fb, font_title, btn_toggle_text, mx + 30, my + 152, mw - 60, AURA_ALIGN_CENTER, 0x00);
+
+    /* Section 2: Hardware Information */
+    aura_fb_draw_rect(fb, mx + 30, my + 210, mw - 60, 1, 1, 0xCC);
+    aura_font_draw_string(fb, font_title, "Informacion de Hardware:", mx + 30, my + 230, 0x00);
+    aura_font_draw_string(fb, font_text, "Dispositivo: Amazon Kindle Touch (D01200)", mx + 30, my + 260, 0x44);
+    aura_font_draw_string(fb, font_text, "SoC: Freescale i.MX508 Cortex-A8 800MHz, 256MB", mx + 30, my + 285, 0x44);
+    aura_font_draw_string(fb, font_text, "Pantalla: E-Ink Pearl 600x800 16-Gray (EPDC)", mx + 30, my + 310, 0x44);
+
+    /* Close Button */
+    aura_fb_draw_rounded_rect(fb, mx + 160, my + mh - 55, 160, 40, 12, 2, 0xFF, 0x00);
+    aura_font_draw_aligned(fb, font_title, "Cerrar", mx + 160, my + mh - 44, 160, AURA_ALIGN_CENTER, 0x00);
 }

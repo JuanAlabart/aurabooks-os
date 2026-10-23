@@ -5,8 +5,10 @@ LDFLAGS ?= -lm
 TARGET = aurabooks_bin
 SRC = src/main.c \
       src/core/aura_fb.c \
+      src/core/aura_power.c \
       src/input/aura_touch.c \
       src/gfx/aura_font.c \
+      src/gfx/aura_image.c \
       src/db/aura_db.c \
       src/ui/aura_ui.c \
       src/reader/aura_reader.c
