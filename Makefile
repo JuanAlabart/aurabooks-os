@@ -11,7 +11,8 @@ SRC = src/main.c \
       src/gfx/aura_image.c \
       src/db/aura_db.c \
       src/ui/aura_ui.c \
-      src/reader/aura_reader.c
+      src/reader/aura_reader.c \
+      src/net/aura_sync.c
 
 OBJ = $(SRC:.c=.o)
 

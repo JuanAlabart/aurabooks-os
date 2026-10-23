@@ -13,6 +13,7 @@
 #include "aura_db.h"
 #include "aura_ui.h"
 #include "aura_reader.h"
+#include "aura_sync.h"
 
 #define AUTOSTART_FLAG_PATH "/mnt/us/ENABLE_AURABOOKS_AUTOSTART"
 
@@ -40,6 +41,8 @@ typedef struct {
     int pages_since_full_refresh;
     int reader_font_size;
     aura_reader_doc_t *reader_doc;
+    aura_wifi_status_t wifi;
+    aura_supabase_sync_t sync;
 } aura_app_state_t;
 
 static void render_home_view(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, aura_db_t *db, aura_app_state_t *state, aura_system_status_t sys_status) {
@@ -195,7 +198,7 @@ static void render_current_view(aura_fb_t *fb, const aura_font_t *font_title, co
 
     if (state->view_mode == AURA_VIEW_SETTINGS) {
         bool autoboot = (access(AUTOSTART_FLAG_PATH, F_OK) == 0);
-        aura_ui_draw_settings_modal(fb, font_title, font_text, autoboot);
+        aura_ui_draw_settings_modal(fb, font_title, font_text, autoboot, state->wifi, state->sync);
     }
 }
 
@@ -277,6 +280,10 @@ int main(int argc, char **argv) {
     state.current_quote_idx = 0;
     state.reader_font_size = 14;
 
+    /* Initialize Wi-Fi and Supabase sync subsystems */
+    aura_sync_init(&state.sync, NULL, NULL);
+    state.wifi = aura_sync_get_wifi_status();
+
     /* First frame: render complete view and trigger clean hardware refresh */
     render_current_view(fb, font_title, font_text, db, &state);
     aura_fb_flush_full(fb, AURA_REFRESH_FULL);
@@ -304,12 +311,26 @@ int main(int argc, char **argv) {
             /* ========================================================= */
             else if (state.view_mode == AURA_VIEW_SETTINGS) {
                 if (ev.type == AURA_TOUCH_UP) {
-                    int mw = 480, mh = 420;
+                    int mw = 520;
+                    int mh = 640;
                     int mx = (SCREEN_WIDTH - mw) / 2;
-                    int my = (SCREEN_HEIGHT - mh) / 2;
+                    int my = 60;
 
-                    /* Toggle Autoarranque */
-                    if (in_rect(ev.x, ev.y, mx + 30, my + 140, mw - 60, 44)) {
+                    /* 1. Wi-Fi Button: mx + 24, my + 112, mw - 48, 36 */
+                    if (in_rect(ev.x, ev.y, mx + 24, my + 112, mw - 48, 36)) {
+                        state.wifi = aura_sync_get_wifi_status();
+                        printf("[settings] Wi-Fi refreshed: %s\n", state.wifi.wifi_ssid);
+                        needs_render = true;
+                    }
+                    /* 2. Supabase Sync Button: mx + 24, my + 248, mw - 48, 42 */
+                    else if (in_rect(ev.x, ev.y, mx + 24, my + 248, mw - 48, 42)) {
+                        printf("[settings] Triggering Supabase cloud sync...\n");
+                        aura_sync_pull_from_supabase(&state.sync, db);
+                        needs_render = true;
+                        refresh_mode = AURA_REFRESH_FULL;
+                    }
+                    /* 3. Toggle Autoarranque: mx + 24, my + 370, mw - 48, 38 */
+                    else if (in_rect(ev.x, ev.y, mx + 24, my + 370, mw - 48, 38)) {
                         bool autoboot = (access(AUTOSTART_FLAG_PATH, F_OK) == 0);
                         if (autoboot) {
                             remove(AUTOSTART_FLAG_PATH);
@@ -324,8 +345,8 @@ int main(int argc, char **argv) {
                         }
                         needs_render = true;
                     }
-                    /* Close Button */
-                    else if (in_rect(ev.x, ev.y, mx + 160, my + mh - 55, 160, 40)) {
+                    /* 4. Close Button: mx + 170, my + mh - 55, 180, 42 */
+                    else if (in_rect(ev.x, ev.y, mx + 170, my + mh - 55, 180, 42)) {
                         state.view_mode = AURA_VIEW_SHELL;
                         needs_render = true;
                     }
@@ -342,6 +363,7 @@ int main(int argc, char **argv) {
                         aura_book_t *b = aura_db_get_active_book(db);
                         if (b) {
                             aura_db_update_progress(db, b->filename, state.reader_doc->current_page, state.reader_doc->total_pages);
+                            aura_sync_push_progress_to_supabase(&state.sync, b->title, state.reader_doc->current_page, state.reader_doc->total_pages, "reading");
                         }
                     }
                     state.view_mode = AURA_VIEW_SHELL;
@@ -364,6 +386,7 @@ int main(int argc, char **argv) {
                                 aura_book_t *b = aura_db_get_active_book(db);
                                 if (b) {
                                     aura_db_update_progress(db, b->filename, state.reader_doc->current_page, state.reader_doc->total_pages);
+                                    aura_sync_push_progress_to_supabase(&state.sync, b->title, state.reader_doc->current_page, state.reader_doc->total_pages, "reading");
                                 }
                             }
                             state.view_mode = AURA_VIEW_SHELL;

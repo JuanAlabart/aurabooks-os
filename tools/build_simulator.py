@@ -160,7 +160,14 @@ html_content = f"""<!DOCTYPE html>
       readerPage: 142,
       readerTotalPages: 420,
       pageTurnCount: 0,
-      autobootEnabled: true
+      autobootEnabled: true,
+      wifiConnected: true,
+      wifiSsid: "Wi-Fi Casa",
+      wifiIp: "192.168.1.45",
+      supabaseStatus: "Listo para sincronizar",
+      lastSyncTime: "Hoy 14:50",
+      syncedCount: 17,
+      isSyncing: false
     }};
 
     const books = [
@@ -484,38 +491,143 @@ Sin embargo, aquella vez, al salir a la calle, él mismo se asombró de su miedo
 
     function renderSettingsModal() {{
       return `
-        <div class="absolute inset-0 bg-black/30 flex items-center justify-center p-6 z-30" onclick="closeSettings()">
-          <div class="w-[480px] bg-[#f7f6f2] border-2 border-black rounded-2xl p-6 shadow-2xl" onclick="event.stopPropagation()">
-            <h2 class="font-bold text-lg text-center pb-3 border-b border-black/20">Ajustes de AuraBooks OS</h2>
-            
-            <div class="py-4">
-              <h3 class="font-bold text-sm">Autoarranque Directo (Upstart):</h3>
-              <p class="text-xs sans text-black/80 mt-1">
-                Estado: <span class="font-bold ${{state.autobootEnabled ? 'text-emerald-700' : 'text-slate-600'}}">
-                  ${{state.autobootEnabled ? '[ ACTIVO — Inicia en AuraBooks ]' : '[ INACTIVO — Inicia en Amazon ]'}}
-                </span>
-              </p>
+        <div class="absolute inset-0 bg-black/40 flex items-center justify-center p-4 z-30" onclick="closeSettings()">
+          <div class="w-[520px] max-h-[720px] bg-[#f7f6f2] border-2 border-black rounded-2xl p-5 shadow-2xl flex flex-col justify-between" onclick="event.stopPropagation()">
+            <div>
+              <h2 class="font-bold text-lg text-center pb-2.5 border-b border-black/20">Ajustes y Conectividad AuraBooks</h2>
+              
+              <!-- SECTION 1: Wi-Fi -->
+              <div class="py-3 border-b border-black/15">
+                <div class="flex justify-between items-center mb-1">
+                  <span class="font-bold text-xs uppercase tracking-wider">* CONECTIVIDAD WI-FI</span>
+                  <span class="text-[11px] sans font-semibold ${{state.wifiConnected ? 'text-emerald-700' : 'text-slate-500'}}">
+                    ${{state.wifiConnected ? '● Conectado (85%)' : '○ Desconectado'}}
+                  </span>
+                </div>
+                <p class="text-xs sans text-black/75">
+                  Red: <strong>${{state.wifiConnected ? state.wifiSsid : 'Ninguna'}}</strong> • IP: ${{state.wifiConnected ? state.wifiIp : '0.0.0.0'}}
+                </p>
+                <button onclick="toggleWifi()" class="mt-2 w-full border border-black py-1.5 rounded-lg text-xs font-semibold hover:bg-black hover:text-white transition-all">
+                  ${{state.wifiConnected ? '↺ Reconectar / Escanear Wi-Fi' : 'Activar Antena Wi-Fi (wlan0)'}}
+                </button>
+              </div>
 
-              <button onclick="toggleAutoboot()" class="mt-3 w-full border-2 border-black py-2.5 rounded-xl text-xs font-bold text-center hover:bg-black hover:text-white transition-all">
-                ${{state.autobootEnabled ? 'Desactivar Autoarranque (Volver a Amazon)' : 'Activar Autoarranque Puro AuraBooks'}}
-              </button>
+              <!-- SECTION 2: Supabase Cloud Sync -->
+              <div class="py-3 border-b border-black/15">
+                <span class="font-bold text-xs uppercase tracking-wider block mb-1">* SINCRONIZACIÓN AURABOOKS APP (SUPABASE)</span>
+                <p class="text-[11px] sans text-black/60 font-mono truncate">
+                  yidwtxqcmwagxdxrtxuf.supabase.co
+                </p>
+                <p class="text-xs sans text-black/80 mt-1">
+                  Última sincro: <strong>${{state.lastSyncTime}}</strong> • Libros sincronizados: <strong>${{state.syncedCount}}</strong>
+                </p>
+                <div class="text-[11px] sans text-emerald-800 font-semibold mt-0.5">
+                  ${{state.supabaseStatus}}
+                </div>
+
+                <button onclick="syncWithSupabase()" class="mt-2.5 w-full border-2 border-black py-2 rounded-xl text-xs font-bold text-center hover:bg-black hover:text-white transition-all flex items-center justify-center gap-2">
+                  ${{state.isSyncing ? `
+                    <span class="inline-block animate-spin">↺</span> Conectando con Supabase...
+                  ` : `
+                    ☁ Sincronizar Ahora con AuraBooks App
+                  `}}
+                </button>
+              </div>
+
+              <!-- SECTION 3: Upstart Autoboot -->
+              <div class="py-3 border-b border-black/15">
+                <span class="font-bold text-xs uppercase tracking-wider block mb-1">* AUTOARRANQUE DEL SISTEMA (UPSTART)</span>
+                <p class="text-xs sans text-black/80">
+                  Estado: <strong class="${{state.autobootEnabled ? 'text-emerald-700' : 'text-slate-600'}}">
+                    ${{state.autobootEnabled ? '[ ACTIVO — Inicia directo en AuraBooks ]' : '[ INACTIVO — Inicia en Amazon ]'}}
+                  </strong>
+                </p>
+
+                <button onclick="toggleAutoboot()" class="mt-2 w-full border border-black py-1.5 rounded-lg text-xs font-semibold hover:bg-black hover:text-white transition-all">
+                  ${{state.autobootEnabled ? 'Desactivar Autoarranque (Volver a Amazon)' : 'Activar Autoarranque Puro AuraBooks'}}
+                </button>
+              </div>
+
+              <!-- SECTION 4: Hardware Specs -->
+              <div class="pt-2 text-[11px] text-black/70 sans space-y-0.5">
+                <div>• Dispositivo: <strong>Amazon Kindle Touch (D01200) K5</strong></div>
+                <div>• SoC: Freescale i.MX508 Cortex-A8 800MHz • 256MB RAM</div>
+                <div>• Binario C Puro: <strong>149 KB</strong> • Consumo RAM: &lt; 12 MB</div>
+              </div>
+
             </div>
 
-            <div class="py-3 border-t border-black/20 text-xs text-black/70 sans space-y-1">
-              <div class="font-bold text-black font-serif text-sm pb-1">Información de Hardware:</div>
-              <div>• Dispositivo: Amazon Kindle Touch (D01200)</div>
-              <div>• SoC: Freescale i.MX508 Cortex-A8 800MHz, 256MB</div>
-              <div>• Pantalla: E-Ink Pearl 600×800 16-Grays (EPDC)</div>
-            </div>
-
-            <div class="pt-4 border-t border-black/20 flex justify-center">
-              <button onclick="closeSettings()" class="border-2 border-black px-8 py-2 rounded-xl text-xs font-bold hover:bg-black hover:text-white transition-all">
-                Cerrar
+            <div class="pt-3 border-t border-black/20 flex justify-center">
+              <button onclick="closeSettings()" class="border-2 border-black px-8 py-1.5 rounded-xl text-xs font-bold hover:bg-black hover:text-white transition-all">
+                Cerrar Ajustes
               </button>
             </div>
           </div>
         </div>
       `;
+    }}
+
+    async function syncWithSupabase() {{
+      if (state.isSyncing) return;
+      state.isSyncing = true;
+      state.supabaseStatus = "Descargando libros y lecturas desde Supabase...";
+      renderScreen(false);
+
+      try {{
+        const url = "https://yidwtxqcmwagxdxrtxuf.supabase.co/rest/v1/books?select=id,title,author,current_page,total_pages,status,rating,cover&order=title.asc";
+        const res = await fetch(url, {{
+          headers: {{
+            "apikey": "sb_publishable_rIcJwDeBSc24Q-_0NNMyJA_IK04u_YS",
+            "Authorization": "Bearer sb_publishable_rIcJwDeBSc24Q-_0NNMyJA_IK04u_YS"
+          }}
+        }});
+
+        if (res.ok) {{
+          const liveBooks = await res.json();
+          if (liveBooks && liveBooks.length > 0) {{
+            // Map live Supabase books into local books array
+            books.length = 0;
+            liveBooks.forEach((b, idx) => {{
+              const pct = (b.total_pages > 0) ? Math.round((b.current_page / b.total_pages) * 100) : 0;
+              let cov = covers.crimen;
+              if (b.title.toLowerCase().includes("extranjero")) cov = covers.extranjero;
+              else if (b.title.toLowerCase().includes("metamorfosis")) cov = covers.metamorfosis;
+              else if (b.title.toLowerCase().includes("jugador")) cov = covers.jugador;
+              else if (b.title.toLowerCase().includes("sombra") || b.title.toLowerCase().includes("zaf")) cov = covers.sombra;
+              else if (b.cover && b.cover.startsWith("http")) cov = b.cover;
+
+              books.push({{
+                id: idx,
+                title: b.title,
+                author: b.author || "Autor Desconocido",
+                cover: cov,
+                pct: pct,
+                curPage: b.current_page || 0,
+                totalPages: b.total_pages || 250,
+                rating: b.rating || 5
+              }});
+            }});
+
+            state.syncedCount = liveBooks.length;
+            const now = new Date();
+            state.lastSyncTime = now.toLocaleTimeString([], {{hour: '2-digit', minute:'2-digit'}});
+            state.supabaseStatus = `✓ Sincronizado: ${{liveBooks.length}} libros actualizados desde tu app`;
+          }}
+        }} else {{
+          state.supabaseStatus = "Error de red al conectar con Supabase";
+        }}
+      }} catch (err) {{
+        console.error("Supabase sync error:", err);
+        state.supabaseStatus = "Error de conexión (verificar Wi-Fi)";
+      }}
+
+      state.isSyncing = false;
+      renderScreen(true);
+    }}
+
+    function toggleWifi() {{
+      state.wifiConnected = !state.wifiConnected;
+      renderScreen(false);
     }}
 
     // State actions

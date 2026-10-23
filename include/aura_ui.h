@@ -7,6 +7,7 @@
 #include "aura_image.h"
 #include "aura_db.h"
 #include "aura_power.h"
+#include "aura_sync.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,8 +67,8 @@ void aura_ui_draw_quote_row(aura_fb_t *fb, const aura_font_t *font_text, const a
 
 void aura_ui_draw_progress_bar(aura_fb_t *fb, int x, int y, int w, int h, float percent, uint8_t fill_color, uint8_t border_color);
 
-/* Settings Modal */
-void aura_ui_draw_settings_modal(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, bool autoboot_enabled);
+/* Settings Modal with Wi-Fi, Supabase Sync, and System Info */
+void aura_ui_draw_settings_modal(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, bool autoboot_enabled, aura_wifi_status_t wifi, aura_supabase_sync_t sync);
 
 #ifdef __cplusplus
 }

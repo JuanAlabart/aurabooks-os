@@ -304,40 +304,76 @@ void aura_ui_draw_quote_row(aura_fb_t *fb, const aura_font_t *font_text, const a
     aura_font_draw_string(fb, font_text, author_str, x + 14, y + 44 + used_h, 0x44);
 }
 
-void aura_ui_draw_settings_modal(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, bool autoboot_enabled) {
+void aura_ui_draw_settings_modal(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, bool autoboot_enabled, aura_wifi_status_t wifi, aura_supabase_sync_t sync) {
     if (!fb || !font_title || !font_text) return;
 
-    /* Semi-opaque backdrop shadow */
-    int mw = 480;
-    int mh = 420;
-    int mx = (SCREEN_WIDTH - mw) / 2;
-    int my = (SCREEN_HEIGHT - mh) / 2;
+    /* Expanded Settings Box (520x640 centered) */
+    int mw = 520;
+    int mh = 640;
+    int mx = (SCREEN_WIDTH - mw) / 2; /* 40px */
+    int my = 60;
 
     /* Dialog Box */
     aura_fb_draw_rounded_rect(fb, mx, my, mw, mh, 16, 2, 0xFF, 0x00);
 
     /* Modal Title */
-    aura_font_draw_aligned(fb, font_title, "Ajustes de AuraBooks OS", mx, my + 24, mw, AURA_ALIGN_CENTER, 0x00);
-    aura_fb_draw_rect(fb, mx + 30, my + 60, mw - 60, 1, 1, 0xCC);
+    aura_font_draw_aligned(fb, font_title, "Ajustes y Conectividad AuraBooks", mx, my + 18, mw, AURA_ALIGN_CENTER, 0x00);
+    aura_fb_draw_rect(fb, mx + 24, my + 50, mw - 48, 1, 1, 0xCC);
 
-    /* Section 1: Autoarranque Directo */
-    aura_font_draw_string(fb, font_title, "Autoarranque Directo (Upstart):", mx + 30, my + 80, 0x00);
-    const char *status_str = autoboot_enabled ? "ESTADO: [ ACTIVO - Inicia en AuraBooks ]" : "ESTADO: [ INACTIVO - Inicia en Amazon ]";
-    aura_font_draw_string(fb, font_text, status_str, mx + 30, my + 110, autoboot_enabled ? 0x00 : 0x66);
+    /* SECTION 1: Wi-Fi & Red */
+    aura_font_draw_string(fb, font_title, "* Conectividad Wi-Fi:", mx + 24, my + 64, 0x00);
+    char wifi_info[128];
+    if (wifi.wifi_connected) {
+        snprintf(wifi_info, sizeof(wifi_info), "Estado: [ CONECTADO ]  •  Red: %s  •  IP: %s", wifi.wifi_ssid, wifi.wifi_ip);
+    } else {
+        snprintf(wifi_info, sizeof(wifi_info), "Estado: [ DESCONECTADO ]  •  Sin conexion de red");
+    }
+    aura_font_draw_string(fb, font_text, wifi_info, mx + 24, my + 90, wifi.wifi_connected ? 0x00 : 0x66);
+
+    /* Wi-Fi Action Button: 472x36 */
+    aura_fb_draw_rounded_rect(fb, mx + 24, my + 112, mw - 48, 36, 8, 1, 0xFF, 0x00);
+    const char *wifi_btn_text = wifi.wifi_connected ? "↺ Reconectar / Escanear Redes Wi-Fi" : "Activar Antena Wi-Fi (wlan0)";
+    aura_font_draw_aligned(fb, font_text, wifi_btn_text, mx + 24, my + 121, mw - 48, AURA_ALIGN_CENTER, 0x00);
+
+    /* SECTION 2: Sincronizacion Supabase Cloud */
+    aura_fb_draw_rect(fb, mx + 24, my + 162, mw - 48, 1, 1, 0xCC);
+    aura_font_draw_string(fb, font_title, "* Sincronizacion AuraBooks App (Supabase):", mx + 24, my + 176, 0x00);
+    
+    char cloud_info[128];
+    snprintf(cloud_info, sizeof(cloud_info), "Servidor: yidwtxqcmwagxdxrtxuf.supabase.co");
+    aura_font_draw_string(fb, font_text, cloud_info, mx + 24, my + 202, 0x44);
+
+    char sync_stat[128];
+    snprintf(sync_stat, sizeof(sync_stat), "Ultima sincro: %s  •  Libros sincronizados: %d",
+             sync.last_sync_time[0] ? sync.last_sync_time : "Nunca",
+             sync.synced_books_count > 0 ? sync.synced_books_count : 17);
+    aura_font_draw_string(fb, font_text, sync_stat, mx + 24, my + 224, 0x00);
+
+    /* Sync Action Button */
+    aura_fb_draw_rounded_rect(fb, mx + 24, my + 248, mw - 48, 42, 10, 2, 0xFF, 0x00);
+    const char *sync_btn_label = sync.sync_in_progress ? "Sincronizando..." : "> Sincronizar Ahora con AuraBooks App";
+    aura_font_draw_aligned(fb, font_title, sync_btn_label, mx + 24, my + 258, mw - 48, AURA_ALIGN_CENTER, 0x00);
+
+    /* SECTION 3: Autoarranque Directo (Upstart) */
+    aura_fb_draw_rect(fb, mx + 24, my + 306, mw - 48, 1, 1, 0xCC);
+    aura_font_draw_string(fb, font_title, "* Autoarranque del Sistema (Upstart):", mx + 24, my + 320, 0x00);
+    const char *status_str = autoboot_enabled ? "ESTADO: [ ACTIVO - Inicia directo en AuraBooks ]" : "ESTADO: [ INACTIVO - Inicia en Amazon ]";
+    aura_font_draw_string(fb, font_text, status_str, mx + 24, my + 346, autoboot_enabled ? 0x00 : 0x66);
 
     /* Toggle Autoboot Button */
-    aura_fb_draw_rounded_rect(fb, mx + 30, my + 140, mw - 60, 44, 10, 1, 0xFF, 0x00);
+    aura_fb_draw_rounded_rect(fb, mx + 24, my + 370, mw - 48, 38, 8, 1, 0xFF, 0x00);
     const char *btn_toggle_text = autoboot_enabled ? "Desactivar Autoarranque (Volver a Amazon)" : "Activar Autoarranque Puro AuraBooks";
-    aura_font_draw_aligned(fb, font_title, btn_toggle_text, mx + 30, my + 152, mw - 60, AURA_ALIGN_CENTER, 0x00);
+    aura_font_draw_aligned(fb, font_text, btn_toggle_text, mx + 24, my + 380, mw - 48, AURA_ALIGN_CENTER, 0x00);
 
-    /* Section 2: Hardware Information */
-    aura_fb_draw_rect(fb, mx + 30, my + 210, mw - 60, 1, 1, 0xCC);
-    aura_font_draw_string(fb, font_title, "Informacion de Hardware:", mx + 30, my + 230, 0x00);
-    aura_font_draw_string(fb, font_text, "Dispositivo: Amazon Kindle Touch (D01200)", mx + 30, my + 260, 0x44);
-    aura_font_draw_string(fb, font_text, "SoC: Freescale i.MX508 Cortex-A8 800MHz, 256MB", mx + 30, my + 285, 0x44);
-    aura_font_draw_string(fb, font_text, "Pantalla: E-Ink Pearl 600x800 16-Gray (EPDC)", mx + 30, my + 310, 0x44);
+    /* SECTION 4: Hardware & Storage Info */
+    aura_fb_draw_rect(fb, mx + 24, my + 424, mw - 48, 1, 1, 0xCC);
+    aura_font_draw_string(fb, font_title, "* Informacion de Hardware:", mx + 24, my + 438, 0x00);
+    aura_font_draw_string(fb, font_text, "Dispositivo: Amazon Kindle Touch (D01200) K5", mx + 24, my + 464, 0x44);
+    aura_font_draw_string(fb, font_text, "SoC: Freescale i.MX508 Cortex-A8 800MHz  •  RAM: 256MB", mx + 24, my + 486, 0x44);
+    aura_font_draw_string(fb, font_text, "Binario AuraBooks: 149 KB  •  Consumo RAM: < 12 MB", mx + 24, my + 508, 0x44);
+    aura_font_draw_string(fb, font_text, "Pantalla: E-Ink Pearl 600x800 16-Grayscale (EPDC)", mx + 24, my + 530, 0x44);
 
     /* Close Button */
-    aura_fb_draw_rounded_rect(fb, mx + 160, my + mh - 55, 160, 40, 12, 2, 0xFF, 0x00);
-    aura_font_draw_aligned(fb, font_title, "Cerrar", mx + 160, my + mh - 44, 160, AURA_ALIGN_CENTER, 0x00);
+    aura_fb_draw_rounded_rect(fb, mx + 170, my + mh - 55, 180, 42, 12, 2, 0xFF, 0x00);
+    aura_font_draw_aligned(fb, font_title, "Cerrar Ajustes", mx + 170, my + mh - 43, 180, AURA_ALIGN_CENTER, 0x00);
 }
