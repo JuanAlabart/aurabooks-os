@@ -348,12 +348,12 @@ int main(int argc, char **argv) {
                     needs_render = true;
                 } else if (ev.type == AURA_GESTURE_SWIPE_LEFT) {
                     /* Next Page */
-                    if (state.reader_doc && aura_reader_next_page(state->reader_doc)) {
+                    if (state.reader_doc && aura_reader_next_page(state.reader_doc)) {
                         needs_render = true;
                     }
                 } else if (ev.type == AURA_GESTURE_SWIPE_RIGHT) {
                     /* Prev Page */
-                    if (state.reader_doc && aura_reader_prev_page(state->reader_doc)) {
+                    if (state.reader_doc && aura_reader_prev_page(state.reader_doc)) {
                         needs_render = true;
                     }
                 } else if (ev.type == AURA_TOUCH_UP) {
