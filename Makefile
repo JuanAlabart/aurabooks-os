@@ -8,7 +8,8 @@ SRC = src/main.c \
       src/input/aura_touch.c \
       src/gfx/aura_font.c \
       src/db/aura_db.c \
-      src/ui/aura_ui.c
+      src/ui/aura_ui.c \
+      src/reader/aura_reader.c
 
 OBJ = $(SRC:.c=.o)
 
