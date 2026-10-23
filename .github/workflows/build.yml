@@ -18,7 +18,7 @@ jobs:
     - name: Install ARM Cross-Compiler Toolchain
       run: |
         sudo apt-get update -qq
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc-arm-linux-gnueabi make
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc-arm-linux-gnueabi libc6-dev-armel-cross make
 
     - name: Compile AuraBooks Native Binary
       run: |
