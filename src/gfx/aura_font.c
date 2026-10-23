@@ -5,13 +5,10 @@
 #include <string.h>
 #include <ctype.h>
 
-#ifdef HAVE_FREETYPE
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#endif
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
 
-/* Standard embedded proportional font glyph table (ASCII 32 to 126) */
-/* 8x16 standard raster font for embedded standalone operation */
+/* Standard embedded proportional font glyph table (ASCII 32 to 126) for fallback */
 static const uint8_t font8x16_data[95][16] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, /*   */
     {0x00,0x00,0x18,0x3c,0x3c,0x3c,0x18,0x18,0x18,0x00,0x18,0x18,0x00,0x00,0x00,0x00}, /* ! */
@@ -113,42 +110,70 @@ static const uint8_t font8x16_data[95][16] = {
 struct aura_font {
     int scale;
     int point_size;
-    bool is_freetype;
-#ifdef HAVE_FREETYPE
-    FT_Face face;
-#endif
+    bool is_truetype;
+    stbtt_fontinfo stb_info;
+    uint8_t *ttf_buffer;
+    float stb_scale;
+    int ascent;
+    int descent;
+    int line_gap;
 };
 
-#ifdef HAVE_FREETYPE
-static FT_Library g_ft_lib = NULL;
-#endif
-
 aura_font_t* aura_font_load(const char *font_path, int point_size) {
-#ifdef HAVE_FREETYPE
-    if (!g_ft_lib) {
-        if (FT_Init_FreeType(&g_ft_lib) != 0) {
-            fprintf(stderr, "[aura_font] Error initializing FreeType.\n");
-            return aura_font_default();
-        }
+    if (!font_path) return aura_font_default();
+
+    FILE *fp = fopen(font_path, "rb");
+    if (!fp) {
+        /* Try assets/fonts path */
+        char fallback_path[256];
+        snprintf(fallback_path, sizeof(fallback_path), "assets/fonts/%s", font_path);
+        fp = fopen(fallback_path, "rb");
     }
 
-    FT_Face face;
-    if (FT_New_Face(g_ft_lib, font_path, 0, &face) == 0) {
-        FT_Set_Pixel_Sizes(face, 0, point_size);
-        aura_font_t *font = (aura_font_t*)calloc(1, sizeof(aura_font_t));
+    if (!fp) {
+        aura_font_t *font = aura_font_default();
+        if (point_size > 18) font->scale = 2;
         font->point_size = point_size;
-        font->is_freetype = true;
-        font->face = face;
         return font;
     }
-#else
-    (void)font_path;
-#endif
 
-    /* Fallback to embedded scalable font */
-    aura_font_t *font = aura_font_default();
-    if (point_size > 20) font->scale = 2;
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    uint8_t *ttf_buffer = (uint8_t*)malloc(size);
+    if (!ttf_buffer) {
+        fclose(fp);
+        return aura_font_default();
+    }
+
+    if (fread(ttf_buffer, 1, size, fp) != (size_t)size) {
+        free(ttf_buffer);
+        fclose(fp);
+        return aura_font_default();
+    }
+    fclose(fp);
+
+    stbtt_fontinfo info;
+    if (!stbtt_InitFont(&info, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer, 0))) {
+        free(ttf_buffer);
+        return aura_font_default();
+    }
+
+    aura_font_t *font = (aura_font_t*)calloc(1, sizeof(aura_font_t));
+    font->is_truetype = true;
+    font->ttf_buffer = ttf_buffer;
+    font->stb_info = info;
     font->point_size = point_size;
+    font->stb_scale = stbtt_ScaleForPixelHeight(&info, (float)point_size);
+
+    int ascent, descent, line_gap;
+    stbtt_GetFontVMetrics(&info, &ascent, &descent, &line_gap);
+    font->ascent = (int)(ascent * font->stb_scale);
+    font->descent = (int)(descent * font->stb_scale);
+    font->line_gap = (int)(line_gap * font->stb_scale);
+
+    printf("[aura_font] Loaded TrueType font %s (%d pt, height %d px)\n", font_path, point_size, font->ascent - font->descent);
     return font;
 }
 
@@ -156,27 +181,39 @@ aura_font_t* aura_font_default(void) {
     aura_font_t *font = (aura_font_t*)calloc(1, sizeof(aura_font_t));
     font->scale = 1;
     font->point_size = 14;
-    font->is_freetype = false;
+    font->is_truetype = false;
     return font;
 }
 
 void aura_font_close(aura_font_t *font) {
     if (!font) return;
-#ifdef HAVE_FREETYPE
-    if (font->is_freetype && font->face) {
-        FT_Done_Face(font->face);
+    if (font->is_truetype && font->ttf_buffer) {
+        free(font->ttf_buffer);
     }
-#endif
     free(font);
 }
 
 int aura_font_get_height(const aura_font_t *font) {
     if (!font) return 16;
+    if (font->is_truetype) {
+        return font->ascent - font->descent + font->line_gap;
+    }
     return 16 * font->scale;
 }
 
 int aura_font_measure_string(const aura_font_t *font, const char *text) {
     if (!font || !text) return 0;
+
+    if (font->is_truetype) {
+        int width = 0;
+        for (size_t i = 0; text[i] != '\0'; i++) {
+            int advance, lsb;
+            stbtt_GetCodepointHMetrics(&font->stb_info, (int)text[i], &advance, &lsb);
+            width += (int)(advance * font->stb_scale);
+        }
+        return width;
+    }
+
     int len = (int)strlen(text);
     return len * 8 * font->scale;
 }
@@ -184,6 +221,59 @@ int aura_font_measure_string(const aura_font_t *font, const char *text) {
 void aura_font_draw_string(aura_fb_t *fb, const aura_font_t *font, const char *text, int x, int y, uint8_t color) {
     if (!fb || !font || !text) return;
 
+    if (font->is_truetype) {
+        float cur_x = (float)x;
+        int baseline_y = y + font->ascent;
+
+        for (size_t i = 0; text[i] != '\0'; i++) {
+            int c = (int)text[i];
+            int advance, lsb;
+            stbtt_GetCodepointHMetrics(&font->stb_info, c, &advance, &lsb);
+
+            int ix0, iy0, ix1, iy1;
+            stbtt_GetCodepointBitmapBox(&font->stb_info, c, font->stb_scale, font->stb_scale, &ix0, &iy0, &ix1, &iy1);
+
+            int glyph_w = ix1 - ix0;
+            int glyph_h = iy1 - iy0;
+
+            if (glyph_w > 0 && glyph_h > 0) {
+                uint8_t *bitmap = (uint8_t*)malloc(glyph_w * glyph_h);
+                if (bitmap) {
+                    stbtt_MakeCodepointBitmap(&font->stb_info, bitmap, glyph_w, glyph_h, glyph_w, font->stb_scale, font->stb_scale, c);
+
+                    int dest_x = (int)cur_x + ix0;
+                    int dest_y = baseline_y + iy0;
+
+                    /* Alpha-blend glyph into grayscale framebuffer */
+                    for (int row = 0; row < glyph_h; row++) {
+                        int py = dest_y + row;
+                        if (py < 0 || py >= SCREEN_HEIGHT) continue;
+
+                        for (int col = 0; col < glyph_w; col++) {
+                            int px = dest_x + col;
+                            if (px < 0 || px >= SCREEN_WIDTH) continue;
+
+                            uint8_t alpha = bitmap[row * glyph_w + col];
+                            if (alpha == 0) continue;
+
+                            size_t offset = py * fb->line_length + px;
+                            uint8_t bg = fb->back_buffer[offset];
+
+                            /* 8-bit Alpha blend formula: out = (color * a + bg * (255 - a)) / 255 */
+                            uint8_t out = (uint8_t)(((uint32_t)color * alpha + (uint32_t)bg * (255 - alpha)) / 255);
+                            fb->back_buffer[offset] = out;
+                        }
+                    }
+                    free(bitmap);
+                }
+            }
+
+            cur_x += advance * font->stb_scale;
+        }
+        return;
+    }
+
+    /* Fallback 8x16 raster font */
     int scale = font->scale;
     int cur_x = x;
 
@@ -226,15 +316,13 @@ int aura_font_draw_wrapped(aura_fb_t *fb, const aura_font_t *font, const char *t
 
     int cur_y = y;
     int line_h = aura_font_get_height(font) + line_spacing;
-    int char_w = 8 * font->scale;
 
-    char line_buf[256];
+    char line_buf[512];
     line_buf[0] = '\0';
     int line_len = 0;
 
     const char *p = text;
     while (*p) {
-        /* Read next word */
         while (*p && isspace((unsigned char)*p)) p++;
         if (!*p) break;
 
@@ -242,26 +330,26 @@ int aura_font_draw_wrapped(aura_fb_t *fb, const aura_font_t *font, const char *t
         while (*p && !isspace((unsigned char)*p)) p++;
         int word_len = (int)(p - word_start);
 
-        int word_pixel_w = word_len * char_w;
-        int current_line_pixel_w = line_len * char_w;
+        char test_buf[512];
+        if (line_len > 0) {
+            snprintf(test_buf, sizeof(test_buf), "%s %.*s", line_buf, word_len, word_start);
+        } else {
+            snprintf(test_buf, sizeof(test_buf), "%.*s", word_len, word_start);
+        }
 
-        if (current_line_pixel_w + word_pixel_w + char_w > max_w && line_len > 0) {
-            /* Flush current line */
-            line_buf[line_len] = '\0';
+        int test_w = aura_font_measure_string(font, test_buf);
+        if (test_w > max_w && line_len > 0) {
             aura_font_draw_string(fb, font, line_buf, x, cur_y, color);
             cur_y += line_h;
-            line_len = 0;
+            snprintf(line_buf, sizeof(line_buf), "%.*s", word_len, word_start);
+            line_len = word_len;
+        } else {
+            snprintf(line_buf, sizeof(line_buf), "%s", test_buf);
+            line_len = (int)strlen(line_buf);
         }
-
-        if (line_len > 0) {
-            line_buf[line_len++] = ' ';
-        }
-        memcpy(&line_buf[line_len], word_start, word_len);
-        line_len += word_len;
     }
 
     if (line_len > 0) {
-        line_buf[line_len] = '\0';
         aura_font_draw_string(fb, font, line_buf, x, cur_y, color);
         cur_y += line_h;
     }
