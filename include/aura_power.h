@@ -10,10 +10,11 @@ extern "C" {
 typedef struct {
     int battery_percent; /* 0 to 100 */
     bool is_charging;
+    bool usb_online;     /* True when connected to USB host / PC */
     char time_str[16];   /* "14:05" */
 } aura_system_status_t;
 
-/* Read current battery level and system clock */
+/* Read current battery level, USB state, and system clock */
 aura_system_status_t aura_power_get_status(void);
 
 /* Put device into low-power E-Ink sleep */

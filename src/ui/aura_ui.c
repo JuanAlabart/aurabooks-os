@@ -377,3 +377,152 @@ void aura_ui_draw_settings_modal(aura_fb_t *fb, const aura_font_t *font_title, c
     aura_fb_draw_rounded_rect(fb, mx + 170, my + mh - 55, 180, 42, 12, 2, 0xFF, 0x00);
     aura_font_draw_aligned(fb, font_title, "Cerrar Ajustes", mx + 170, my + mh - 43, 180, AURA_ALIGN_CENTER, 0x00);
 }
+
+
+void aura_ui_draw_toast(aura_fb_t *fb, const aura_font_t *font, const char *msg) {
+    if (!fb || !font || !msg) return;
+
+    int msg_w = aura_font_measure_string(font, msg);
+    int tw = msg_w + 48;
+    if (tw < 260) tw = 260;
+    if (tw > SCREEN_WIDTH - 40) tw = SCREEN_WIDTH - 40;
+    int th = 46;
+    int tx = (SCREEN_WIDTH - tw) / 2;
+    int ty = 680;
+
+    /* Floating shadow / border effect */
+    aura_fb_draw_rounded_rect(fb, tx + 2, ty + 2, tw, th, 18, 1, 0xEE, 0xAA);
+    aura_fb_draw_rounded_rect(fb, tx, ty, tw, th, 18, 2, 0xFF, 0x00);
+    aura_font_draw_aligned(fb, font, msg, tx, ty + 15, tw, AURA_ALIGN_CENTER, 0x00);
+}
+
+void aura_ui_draw_usb_modal(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text) {
+    if (!fb || !font_title || !font_text) return;
+
+    int mw = 520;
+    int mh = 420;
+    int mx = (SCREEN_WIDTH - mw) / 2;
+    int my = (SCREEN_HEIGHT - mh) / 2;
+
+    /* Card background with shadow and rounded corners */
+    aura_fb_draw_rounded_rect(fb, mx + 4, my + 4, mw, mh, 20, 1, 0xDD, 0xDD);
+    aura_fb_draw_rounded_rect(fb, mx, my, mw, mh, 20, 2, 0xFF, 0x00);
+
+    /* USB Icon badge */
+    aura_fb_draw_rounded_rect(fb, mx + (mw - 90)/2, my + 24, 90, 36, 12, 1, 0xEE, 0x00);
+    aura_font_draw_aligned(fb, font_title, "* USB", mx + (mw - 90)/2, my + 33, 90, AURA_ALIGN_CENTER, 0x00);
+
+    /* Modal Titles */
+    aura_font_draw_aligned(fb, font_title, "Modo Almacenamiento USB Conectado", mx, my + 76, mw, AURA_ALIGN_CENTER, 0x00);
+    aura_font_draw_aligned(fb, font_text, "Tu Kindle esta conectado a la computadora.", mx, my + 104, mw, AURA_ALIGN_CENTER, 0x44);
+
+    /* Inner rounded info card */
+    int card_x = mx + 28;
+    int card_w = mw - 56;
+    int card_y = my + 135;
+    int card_h = 175;
+    aura_fb_draw_rounded_rect(fb, card_x, card_y, card_w, card_h, 14, 1, 0xF6, 0x00);
+
+    aura_font_draw_string(fb, font_title, "* TRANSFERENCIA DE LIBROS Y CITAS", card_x + 16, card_y + 14, 0x00);
+    aura_font_draw_string(fb, font_text, "1. La unidad USB de tu Kindle esta lista en tu PC.", card_x + 16, card_y + 44, 0x00);
+    aura_font_draw_string(fb, font_text, "2. Copia tus libros (.azw3, .mobi, .epub) a la carpeta 'documents'.", card_x + 16, card_y + 70, 0x00);
+    aura_font_draw_string(fb, font_text, "3. Al expulsar la unidad o desconectar el cable,", card_x + 16, card_y + 98, 0x44);
+    aura_font_draw_string(fb, font_text, "   AuraBooks actualizara tu biblioteca automaticamente.", card_x + 16, card_y + 120, 0x44);
+
+    /* Action button */
+    int btn_w = 240;
+    int btn_h = 44;
+    int btn_x = mx + (mw - btn_w) / 2;
+    int btn_y = my + mh - 60;
+    aura_fb_draw_rounded_rect(fb, btn_x, btn_y, btn_w, btn_h, 18, 2, 0xFF, 0x00);
+    aura_font_draw_aligned(fb, font_title, "Continuar Leyendo", btn_x, btn_y + 13, btn_w, AURA_ALIGN_CENTER, 0x00);
+}
+
+void aura_ui_draw_missing_book_screen(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, const aura_book_t *book) {
+    if (!fb || !font_title || !font_text) return;
+
+    /* Fill background */
+    aura_fb_fill_rect(fb, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0xFF);
+
+    /* Header with [< Volver a la Biblioteca] */
+    int back_w = 200;
+    int back_h = 38;
+    aura_fb_draw_rounded_rect(fb, 20, 16, back_w, back_h, 12, 1, 0xFF, 0x00);
+    aura_font_draw_aligned(fb, font_title, "< Volver a la Biblioteca", 20, 26, back_w, AURA_ALIGN_CENTER, 0x00);
+
+    /* Centered Book Preview Card */
+    int card_w = 480;
+    int card_h = 240;
+    int card_x = (SCREEN_WIDTH - card_w) / 2;
+    int card_y = 80;
+
+    aura_fb_draw_rounded_rect(fb, card_x + 3, card_y + 3, card_w, card_h, 16, 1, 0xEE, 0xDD);
+    aura_fb_draw_rounded_rect(fb, card_x, card_y, card_w, card_h, 16, 1, 0xFF, 0x00);
+
+    /* Cover on Left: 110x160 */
+    int cover_x = card_x + 20;
+    int cover_y = card_y + 20;
+    int cover_w = 110;
+    int cover_h = 160;
+
+    bool cover_rendered = false;
+    if (book && book->cover_path[0] != '\0') {
+        aura_image_t *img = aura_image_load(book->cover_path);
+        if (img) {
+            aura_image_dither_floyd_steinberg(fb, img, cover_x, cover_y, cover_w, cover_h);
+            aura_fb_draw_rect(fb, cover_x, cover_y, cover_w, cover_h, 1, 0x00);
+            aura_image_free(img);
+            cover_rendered = true;
+        }
+    }
+    if (!cover_rendered) {
+        aura_fb_draw_rounded_rect(fb, cover_x, cover_y, cover_w, cover_h, 10, 1, 0xF2, 0x00);
+        aura_font_draw_aligned(fb, font_title, "Libro", cover_x, cover_y + 65, cover_w, AURA_ALIGN_CENTER, 0x66);
+    }
+
+    /* Book Info on Right */
+    int info_x = cover_x + cover_w + 24;
+
+    const char *title = book ? book->title : "Libro Registrado";
+    const char *author = (book && book->author[0]) ? book->author : "Autor";
+
+    aura_font_draw_string(fb, font_title, title, info_x, card_y + 30, 0x00);
+    aura_font_draw_string(fb, font_text, author, info_x, card_y + 65, 0x55);
+
+    char star_buf[64];
+    int rating = book ? book->rating : 5;
+    const char *stars = (rating == 5) ? "[*****]" : (rating == 4) ? "[****-]" : "[***--]";
+    snprintf(star_buf, sizeof(star_buf), "%s  •  %d%% leido", stars, book ? book->percent : 0);
+    aura_font_draw_string(fb, font_text, star_buf, info_x, card_y + 98, 0x00);
+
+    char pages_buf[64];
+    snprintf(pages_buf, sizeof(pages_buf), "Pagina %d de %d", book ? book->current_page : 0, book ? book->total_pages : 250);
+    aura_font_draw_string(fb, font_text, pages_buf, info_x, card_y + 124, 0x66);
+
+    /* Notification Banner Below Card */
+    int banner_w = 480;
+    int banner_h = 240;
+    int banner_x = (SCREEN_WIDTH - banner_w) / 2;
+    int banner_y = card_y + card_h + 30;
+
+    aura_fb_draw_rounded_rect(fb, banner_x, banner_y, banner_w, banner_h, 16, 1, 0xF7, 0x00);
+
+    /* Banner Badge */
+    aura_fb_draw_rounded_rect(fb, banner_x + 20, banner_y + 20, 240, 30, 8, 1, 0xFF, 0x00);
+    aura_font_draw_aligned(fb, font_text, "* ARCHIVO PENDIENTE DE COPIAR", banner_x + 20, banner_y + 27, 240, AURA_ALIGN_CENTER, 0x00);
+
+    aura_font_draw_string(fb, font_title, "El texto completo de este libro aun no esta en el Kindle.", banner_x + 20, banner_y + 68, 0x00);
+
+    aura_font_draw_string(fb, font_text, "Este libro esta en tu registro de lectura de AuraBooks.", banner_x + 20, banner_y + 104, 0x44);
+    aura_font_draw_string(fb, font_text, "Para leerlo en esta pantalla de tinta electronica:", banner_x + 20, banner_y + 128, 0x44);
+    aura_font_draw_string(fb, font_text, "1. Conecta el Kindle a tu PC con el cable USB.", banner_x + 20, banner_y + 154, 0x00);
+    aura_font_draw_string(fb, font_text, "2. Copia el archivo (.azw3 o .mobi) a la carpeta 'documents'.", banner_x + 20, banner_y + 178, 0x00);
+
+    /* Bottom Big Pill Button */
+    int bbtn_w = 280;
+    int bbtn_h = 48;
+    int bbtn_x = (SCREEN_WIDTH - bbtn_w) / 2;
+    int bbtn_y = banner_y + banner_h + 35;
+    aura_fb_draw_rounded_rect(fb, bbtn_x, bbtn_y, bbtn_w, bbtn_h, 20, 2, 0xFF, 0x00);
+    aura_font_draw_aligned(fb, font_title, "< Volver a la Biblioteca", bbtn_x, bbtn_y + 15, bbtn_w, AURA_ALIGN_CENTER, 0x00);
+}

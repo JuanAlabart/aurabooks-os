@@ -37,7 +37,8 @@ typedef enum {
     AURA_VIEW_SHELL = 0,
     AURA_VIEW_READER,
     AURA_VIEW_COVER_FULLSCREEN,
-    AURA_VIEW_SETTINGS
+    AURA_VIEW_SETTINGS,
+    AURA_VIEW_USB_MODAL
 } aura_view_mode_t;
 
 typedef struct {
@@ -69,6 +70,15 @@ void aura_ui_draw_progress_bar(aura_fb_t *fb, int x, int y, int w, int h, float 
 
 /* Settings Modal with Wi-Fi, Supabase Sync, and System Info */
 void aura_ui_draw_settings_modal(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, bool autoboot_enabled, aura_wifi_status_t wifi, aura_supabase_sync_t sync);
+
+/* Aesthetic Native Toast / Floating Notification */
+void aura_ui_draw_toast(aura_fb_t *fb, const aura_font_t *font, const char *msg);
+
+/* Aesthetic Native USB Storage Connection Modal */
+void aura_ui_draw_usb_modal(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text);
+
+/* Aesthetic Missing Book File Fallback Screen with < Volver */
+void aura_ui_draw_missing_book_screen(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, const aura_book_t *book);
 
 #ifdef __cplusplus
 }

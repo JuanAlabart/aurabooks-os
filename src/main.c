@@ -4,6 +4,8 @@
 #include <signal.h>
 #include <unistd.h>
 #include <string.h>
+#include <dirent.h>
+#include <time.h>
 
 #include "aura_fb.h"
 #include "aura_touch.h"
@@ -28,6 +30,12 @@ static inline bool in_rect(int px, int py, int x, int y, int w, int h) {
     return (px >= x && px <= x + w && py >= y && py <= y + h);
 }
 
+static inline uint64_t get_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+
 /* App State */
 typedef struct {
     aura_view_mode_t view_mode;
@@ -43,115 +51,168 @@ typedef struct {
     aura_reader_doc_t *reader_doc;
     aura_wifi_status_t wifi;
     aura_supabase_sync_t sync;
+    char toast_msg[128];
+    uint64_t toast_expiry_ms;
 } aura_app_state_t;
+
+static void show_toast(aura_app_state_t *state, const char *msg, uint32_t duration_ms) {
+    if (!state || !msg) return;
+    snprintf(state->toast_msg, sizeof(state->toast_msg), "%s", msg);
+    state->toast_expiry_ms = get_now_ms() + duration_ms;
+}
+
+static char* find_book_file(const char *title, const char *filename) {
+    static char found_path[256];
+    if (filename && filename[0]) {
+        snprintf(found_path, sizeof(found_path), "/mnt/us/documents/%s", filename);
+        if (access(found_path, R_OK) == 0) return found_path;
+
+        snprintf(found_path, sizeof(found_path), "%s", filename);
+        if (access(found_path, R_OK) == 0) return found_path;
+    }
+
+    if (title && strlen(title) >= 3) {
+        /* Scan /mnt/us/documents/ for matching title */
+        DIR *dir = opendir("/mnt/us/documents");
+        if (dir) {
+            struct dirent *ent;
+            while ((ent = readdir(dir)) != NULL) {
+                if (ent->d_name[0] == '.') continue;
+                if (strcasestr(ent->d_name, title)) {
+                    snprintf(found_path, sizeof(found_path), "/mnt/us/documents/%s", ent->d_name);
+                    closedir(dir);
+                    return found_path;
+                }
+            }
+            closedir(dir);
+        }
+    }
+
+    return NULL;
+}
 
 static void render_home_view(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, aura_db_t *db, aura_app_state_t *state, aura_system_status_t sys_status) {
     int card_w = SCREEN_WIDTH - 32; /* 568px */
     int x = 16;
 
-    aura_ui_draw_header(fb, font_title, font_text, "A U R A B O O K S", sys_status);
+    aura_ui_draw_header(fb, font_title, font_text, "AuraBooks", sys_status);
 
-    /* 1. Hero Card: Lectura actual (y = 64, h = 240) */
-    aura_book_t *active_book = aura_db_get_active_book(db);
-    if (active_book) {
-        aura_ui_draw_hero_card(fb, font_title, font_text, active_book, x, 64, card_w, 240);
-    }
+    /* 1. Hero Card (Active Book) */
+    aura_book_t *active = aura_db_get_active_book(db);
+    aura_ui_draw_hero_card(fb, font_title, font_text, active, x, 56, card_w, 246);
 
-    /* 2. Cita del Día Card (y = 328, h = 150) */
-    aura_quote_t *quote = aura_db_get_quote(db, state->current_quote_idx);
-    if (quote) {
-        aura_ui_draw_quote_card(fb, font_title, font_text, quote, x, 328, card_w, 150);
-    }
+    /* 2. Literary Quote Card */
+    int q_idx = state->current_quote_idx;
+    if (q_idx >= aura_db_get_quote_count(db)) q_idx = 0;
+    aura_quote_t *q = aura_db_get_quote(db, q_idx);
+    aura_ui_draw_quote_card(fb, font_title, font_text, q, x, 314, card_w, 142);
 
-    /* 3. Tu Biblioteca y Actividad Card (y = 502, h = 175) */
-    aura_ui_draw_stats_card(fb, font_title, font_text, db, x, 502, card_w, 175);
+    /* 3. Library Summary Card */
+    aura_ui_draw_stats_card(fb, font_title, font_text, db, x, 468, card_w, 196);
 }
 
-static void render_library_view(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, aura_db_t *db, aura_app_state_t *state, aura_system_status_t sys_status) {
-    int card_w = SCREEN_WIDTH - 32;
+static void render_library_view(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, const aura_db_t *db, const aura_app_state_t *state, aura_system_status_t sys_status) {
     int x = 16;
+    aura_ui_draw_header(fb, font_title, font_text, "Biblioteca", sys_status);
 
-    aura_ui_draw_header(fb, font_title, font_text, "B I B L I O T E C A", sys_status);
-
-    /* 5 Filter buttons bar */
-    const char *filters[5] = { "Todos", "Autores", "Leyendo", "Por Leer", "Leidos" };
+    /* 5 Filter Pills: Todos, Autores, Leyendo, Por Leer, Leidos (h = 34px) */
+    const char *filters[] = { "Todos", "Autores", "Leyendo", "Por Leer", "Leidos" };
     int fw = 108;
+    int f_gap = 6;
     for (int i = 0; i < 5; i++) {
-        bool is_active = (state->lib_filter == i);
-        aura_fb_draw_rounded_rect(fb, x + i * (fw + 6), 56, fw, 34, 12, is_active ? 2 : 1, 0xFF, 0x00);
-        aura_font_draw_aligned(fb, font_text, filters[i], x + i * (fw + 6), 64, fw, AURA_ALIGN_CENTER, 0x00);
+        int fx = x + i * (fw + f_gap);
+        bool is_sel = (state->lib_filter == i);
+        aura_fb_draw_rounded_rect(fb, fx, 56, fw, 34, 10, is_sel ? 2 : 1, 0xFF, 0x00);
+        aura_font_draw_aligned(fb, font_text, filters[i], fx, 66, fw, AURA_ALIGN_CENTER, 0x00);
     }
 
-    /* 6 Book Cards (84px tall, 6px gaps) */
-    int card_y = 102;
+    /* 6 Book rows (h = 84px, gap = 6px) */
+    int start_y = 102;
+    int card_w = SCREEN_WIDTH - 32;
+    int card_h = 84;
+    int gap = 6;
+
     int total_books = aura_db_get_book_count(db);
     int books_per_page = 6;
-    int start_idx = state->lib_page * books_per_page;
+    int page_start = state->lib_page * books_per_page;
+
+    for (int i = 0; i < books_per_page; i++) {
+        int book_idx = page_start + i;
+        if (book_idx >= total_books) break;
+
+        aura_book_t *b = aura_db_get_book((aura_db_t*)db, book_idx);
+        int cy = start_y + i * (card_h + gap);
+        aura_ui_draw_book_row(fb, font_title, font_text, b, x, cy, card_w, card_h);
+    }
+
+    /* Pagination */
     int total_pages = (total_books + books_per_page - 1) / books_per_page;
     if (total_pages < 1) total_pages = 1;
 
-    for (int i = 0; i < books_per_page; i++) {
-        int b_idx = start_idx + i;
-        if (b_idx >= total_books) break;
-        aura_book_t *b = aura_db_get_book(db, b_idx);
-        int y = card_y + i * (84 + 6);
-        aura_ui_draw_book_row(fb, font_title, font_text, b, x, y, card_w, 84);
-    }
-
-    /* Pagination controls */
-    aura_fb_draw_rounded_rect(fb, 145, 652, 110, 36, 12, 1, 0xFF, 0x00);
-    aura_font_draw_aligned(fb, font_text, "< Anterior", 145, 661, 110, AURA_ALIGN_CENTER, 0x00);
-
     char page_str[32];
-    snprintf(page_str, sizeof(page_str), "Pag. %d de %d", state->lib_page + 1, total_pages);
-    aura_font_draw_aligned(fb, font_text, page_str, 260, 661, 80, AURA_ALIGN_CENTER, 0x00);
+    snprintf(page_str, sizeof(page_str), "%d / %d", state->lib_page + 1, total_pages);
+    aura_font_draw_aligned(fb, font_text, page_str, 0, 660, SCREEN_WIDTH, AURA_ALIGN_CENTER, 0x44);
 
-    aura_fb_draw_rounded_rect(fb, 345, 652, 110, 36, 12, 1, 0xFF, 0x00);
-    aura_font_draw_aligned(fb, font_text, "Siguiente >", 345, 661, 110, AURA_ALIGN_CENTER, 0x00);
+    if (state->lib_page > 0) {
+        aura_fb_draw_rounded_rect(fb, 145, 652, 110, 36, 12, 1, 0xFF, 0x00);
+        aura_font_draw_aligned(fb, font_text, "< Anterior", 145, 662, 110, AURA_ALIGN_CENTER, 0x00);
+    }
+    if (state->lib_page + 1 < total_pages) {
+        aura_fb_draw_rounded_rect(fb, 345, 652, 110, 36, 12, 1, 0xFF, 0x00);
+        aura_font_draw_aligned(fb, font_text, "Siguiente >", 345, 662, 110, AURA_ALIGN_CENTER, 0x00);
+    }
 }
 
-static void render_quotes_view(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, aura_db_t *db, aura_app_state_t *state, aura_system_status_t sys_status) {
-    int card_w = SCREEN_WIDTH - 32;
+static void render_quotes_view(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, const aura_db_t *db, const aura_app_state_t *state, aura_system_status_t sys_status) {
     int x = 16;
+    aura_ui_draw_header(fb, font_title, font_text, "Citas y Notas", sys_status);
 
-    aura_ui_draw_header(fb, font_title, font_text, "C I T A S", sys_status);
-
-    /* 3 Filter buttons */
-    const char *q_filters[3] = { "Todas", "Mis Citas", "Celebres" };
+    /* 3 Filter Pills: Todas, Mis Citas, Celebres (180x34) */
+    const char *qfilters[] = { "Todas", "Mis Citas", "Celebres" };
     int fw = 180;
+    int f_gap = 14;
     for (int i = 0; i < 3; i++) {
-        bool is_active = (state->quotes_filter == i);
-        aura_fb_draw_rounded_rect(fb, x + i * (fw + 14), 56, fw, 34, 12, is_active ? 2 : 1, 0xFF, 0x00);
-        aura_font_draw_aligned(fb, font_text, q_filters[i], x + i * (fw + 14), 64, fw, AURA_ALIGN_CENTER, 0x00);
+        int fx = x + i * (fw + f_gap);
+        bool is_sel = (state->quotes_filter == i);
+        aura_fb_draw_rounded_rect(fb, fx, 56, fw, 34, 10, is_sel ? 2 : 1, 0xFF, 0x00);
+        aura_font_draw_aligned(fb, font_text, qfilters[i], fx, 66, fw, AURA_ALIGN_CENTER, 0x00);
     }
 
-    /* 3 Generous Quote Cards */
-    int card_y = 106;
-    int q_height = 135;
+    /* 3 Quote rows */
+    int start_y = 104;
+    int card_w = SCREEN_WIDTH - 32;
+    int card_h = 142;
+    int gap = 10;
+
     int total_quotes = aura_db_get_quote_count(db);
     int quotes_per_page = 3;
-    int start_idx = state->quotes_page * quotes_per_page;
+    int page_start = state->quotes_page * quotes_per_page;
+
+    for (int i = 0; i < quotes_per_page; i++) {
+        int q_idx = page_start + i;
+        if (q_idx >= total_quotes) break;
+
+        aura_quote_t *q = aura_db_get_quote((aura_db_t*)db, q_idx);
+        int cy = start_y + i * (card_h + gap);
+        aura_ui_draw_quote_row(fb, font_text, q, x, cy, card_w, card_h);
+    }
+
+    /* Pagination */
     int total_pages = (total_quotes + quotes_per_page - 1) / quotes_per_page;
     if (total_pages < 1) total_pages = 1;
 
-    for (int i = 0; i < quotes_per_page; i++) {
-        int q_idx = start_idx + i;
-        if (q_idx >= total_quotes) break;
-        aura_quote_t *q = aura_db_get_quote(db, q_idx);
-        int y = card_y + i * (q_height + 12);
-        aura_ui_draw_quote_row(fb, font_text, q, x, y, card_w, q_height);
-    }
-
-    /* Pagination controls */
-    aura_fb_draw_rounded_rect(fb, 145, 560, 110, 36, 12, 1, 0xFF, 0x00);
-    aura_font_draw_aligned(fb, font_text, "< Anterior", 145, 569, 110, AURA_ALIGN_CENTER, 0x00);
-
     char page_str[32];
-    snprintf(page_str, sizeof(page_str), "Pag. %d de %d", state->quotes_page + 1, total_pages);
-    aura_font_draw_aligned(fb, font_text, page_str, 260, 569, 80, AURA_ALIGN_CENTER, 0x00);
+    snprintf(page_str, sizeof(page_str), "%d / %d", state->quotes_page + 1, total_pages);
+    aura_font_draw_aligned(fb, font_text, page_str, 0, 568, SCREEN_WIDTH, AURA_ALIGN_CENTER, 0x44);
 
-    aura_fb_draw_rounded_rect(fb, 345, 560, 110, 36, 12, 1, 0xFF, 0x00);
-    aura_font_draw_aligned(fb, font_text, "Siguiente >", 345, 569, 110, AURA_ALIGN_CENTER, 0x00);
+    if (state->quotes_page > 0) {
+        aura_fb_draw_rounded_rect(fb, 145, 560, 110, 36, 12, 1, 0xFF, 0x00);
+        aura_font_draw_aligned(fb, font_text, "< Anterior", 145, 570, 110, AURA_ALIGN_CENTER, 0x00);
+    }
+    if (state->quotes_page + 1 < total_pages) {
+        aura_fb_draw_rounded_rect(fb, 345, 560, 110, 36, 12, 1, 0xFF, 0x00);
+        aura_font_draw_aligned(fb, font_text, "Siguiente >", 345, 570, 110, AURA_ALIGN_CENTER, 0x00);
+    }
 }
 
 static void render_fullscreen_cover(aura_fb_t *fb, const aura_book_t *book) {
@@ -161,26 +222,37 @@ static void render_fullscreen_cover(aura_fb_t *fb, const aura_book_t *book) {
     if (book->cover_path[0] != '\0') {
         aura_image_t *img = aura_image_load(book->cover_path);
         if (img) {
-            aura_image_draw_scaled(fb, img, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            aura_image_dither_floyd_steinberg(fb, img, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
             aura_image_free(img);
             return;
         }
     }
+
+    /* Minimalist sleep cover */
+    aura_fb_draw_rounded_rect(fb, 40, 100, SCREEN_WIDTH - 80, SCREEN_HEIGHT - 200, 24, 2, 0xFF, 0x00);
 }
 
 static void render_current_view(aura_fb_t *fb, const aura_font_t *font_title, const aura_font_t *font_text, aura_db_t *db, aura_app_state_t *state) {
     aura_system_status_t sys_status = aura_power_get_status();
 
-    if (state->view_mode == AURA_VIEW_READER) {
-        if (state->reader_doc) {
-            aura_reader_render_page(fb, font_text, state->reader_doc, state->show_reader_hud);
-        }
+    if (state->view_mode == AURA_VIEW_USB_MODAL) {
+        aura_ui_draw_usb_modal(fb, font_title, font_text);
         return;
     }
 
     if (state->view_mode == AURA_VIEW_COVER_FULLSCREEN) {
         aura_book_t *b = aura_db_get_active_book(db);
         render_fullscreen_cover(fb, b);
+        return;
+    }
+
+    if (state->view_mode == AURA_VIEW_READER) {
+        if (state->reader_doc) {
+            aura_reader_render_page(fb, font_text, state->reader_doc, state->show_reader_hud);
+        } else {
+            aura_book_t *b = aura_db_get_active_book(db);
+            aura_ui_draw_missing_book_screen(fb, font_title, font_text, b);
+        }
         return;
     }
 
@@ -200,6 +272,12 @@ static void render_current_view(aura_fb_t *fb, const aura_font_t *font_title, co
         bool autoboot = (access(AUTOSTART_FLAG_PATH, F_OK) == 0);
         aura_ui_draw_settings_modal(fb, font_title, font_text, autoboot, state->wifi, state->sync);
     }
+
+    /* Active Toast Notification */
+    uint64_t now = get_now_ms();
+    if (now < state->toast_expiry_ms && state->toast_msg[0] != '\0') {
+        aura_ui_draw_toast(fb, font_text, state->toast_msg);
+    }
 }
 
 static void open_book_in_reader(aura_app_state_t *state, aura_db_t *db, const aura_font_t *font_text, int book_idx) {
@@ -211,13 +289,11 @@ static void open_book_in_reader(aura_app_state_t *state, aura_db_t *db, const au
         state->reader_doc = NULL;
     }
 
-    char book_path[256];
-    snprintf(book_path, sizeof(book_path), "/mnt/us/documents/%s", book->filename);
-
-    state->reader_doc = aura_reader_open(book_path);
-    if (!state->reader_doc) {
-        /* Try current directory fallback */
-        state->reader_doc = aura_reader_open(book->filename);
+    char *target = find_book_file(book->title, book->filename);
+    if (target) {
+        state->reader_doc = aura_reader_open(target);
+    } else {
+        state->reader_doc = NULL;
     }
 
     if (state->reader_doc) {
@@ -244,43 +320,53 @@ int main(int argc, char **argv) {
     signal(SIGTERM, sig_handler);
 
     printf("====================================================\n");
-    printf("   AuraBooks Native Embedded OS v0.2 (Kindle Touch)  \n");
+    printf("   AuraBooks Native Embedded OS v0.3 (Kindle Touch)  \n");
     printf("   Architecture: ARMv7-A Cortex-A8 (i.MX508 EPDC)   \n");
     printf("====================================================\n");
 
     /* 1. Initialize Framebuffer */
     aura_fb_t *fb = aura_fb_init("/dev/fb0");
     if (!fb) {
-        fprintf(stderr, "[main] Fatal: Unable to initialize framebuffer.\n");
+        fprintf(stderr, "[main] Fatal: Framebuffer init failed.\n");
         return 1;
     }
 
-    /* 2. Initialize Touch Input */
+    /* 2. Initialize Touch Controller */
     aura_touch_t *touch = aura_touch_init("/dev/input/event0");
+    if (!touch) {
+        fprintf(stderr, "[main] Warning: Starting without hardware touch.\n");
+    }
 
-    /* 3. Initialize Fonts (Literata TrueType) */
-    aura_font_t *font_title = aura_font_load("Literata-Bold.ttf", 22);
-    if (!font_title) font_title = aura_font_load("/mnt/us/fonts/Literata-Bold.ttf", 22);
+    /* 3. Load Vector Typography (Literata) */
+    aura_font_t *font_title = aura_font_load("Literata-Bold.ttf", 20);
+    aura_font_t *font_text = aura_font_load("Literata-Regular.ttf", 16);
 
-    aura_font_t *font_text = aura_font_load("Literata-Regular.ttf", 14);
-    if (!font_text) font_text = aura_font_load("/mnt/us/fonts/Literata-Regular.ttf", 14);
+    if (!font_title) font_title = aura_font_load("/mnt/us/aurabooks/fonts/Literata-Bold.ttf", 20);
+    if (!font_text) font_text = aura_font_load("/mnt/us/aurabooks/fonts/Literata-Regular.ttf", 16);
 
-    /* 4. Initialize Database & Storage */
+    if (!font_title || !font_text) {
+        fprintf(stderr, "[main] Fatal: Unable to load Literata TrueType fonts.\n");
+        aura_fb_close(fb);
+        return 1;
+    }
+
+    /* 4. Initialize Local Database */
     aura_db_t *db = aura_db_init("/mnt/us/aurabooks_data.bin");
+    if (!db) {
+        fprintf(stderr, "[main] Fatal: Database init failed.\n");
+        aura_font_close(font_title);
+        aura_font_close(font_text);
+        aura_fb_close(fb);
+        return 1;
+    }
 
-    /* 5. Initialize App State */
+    /* 5. Initialize Application State */
     aura_app_state_t state;
     memset(&state, 0, sizeof(state));
     state.view_mode = AURA_VIEW_SHELL;
     state.navbar.active_tab = AURA_TAB_HOME;
-    state.lib_filter = 0;
-    state.lib_page = 0;
-    state.quotes_filter = 0;
-    state.quotes_page = 0;
-    state.current_quote_idx = 0;
-    state.reader_font_size = 14;
-
-    /* Initialize Wi-Fi and Supabase sync subsystems */
+    state.reader_font_size = 18;
+    state.toast_expiry_ms = 0;
     aura_sync_init(&state.sync, NULL, NULL);
     state.wifi = aura_sync_get_wifi_status();
 
@@ -289,16 +375,52 @@ int main(int argc, char **argv) {
     aura_fb_flush_full(fb, AURA_REFRESH_FULL);
     printf("[main] Initial screen drawn and flashed via EPDC GC16.\n");
 
+    static bool prev_usb_online = false;
     aura_touch_event_t ev;
+
     while (g_running) {
+        /* Monitor USB Connection state */
+        aura_system_status_t p_status = aura_power_get_status();
+        if (p_status.usb_online && !prev_usb_online) {
+            aura_db_save(db);
+            if (state.reader_doc) {
+                aura_reader_close(state.reader_doc);
+                state.reader_doc = NULL;
+            }
+            state.view_mode = AURA_VIEW_USB_MODAL;
+            render_current_view(fb, font_title, font_text, db, &state);
+            aura_fb_flush_full(fb, AURA_REFRESH_FULL);
+        } else if (!p_status.usb_online && prev_usb_online) {
+            /* USB disconnected: re-scan documents folder for newly copied books */
+            aura_db_scan_documents(db, "/mnt/us/documents");
+            if (state.view_mode == AURA_VIEW_USB_MODAL) {
+                state.view_mode = AURA_VIEW_SHELL;
+            }
+            show_toast(&state, "Biblioteca de libros actualizada", 2500);
+            render_current_view(fb, font_title, font_text, db, &state);
+            aura_fb_flush_full(fb, AURA_REFRESH_FULL);
+        }
+        prev_usb_online = p_status.usb_online;
+
         if (touch && aura_touch_poll(touch, &ev)) {
             bool needs_render = false;
             aura_refresh_mode_t refresh_mode = AURA_REFRESH_FAST;
 
             /* ========================================================= */
+            /* VIEW: USB MODAL                                           */
+            /* ========================================================= */
+            if (state.view_mode == AURA_VIEW_USB_MODAL) {
+                if (ev.type == AURA_TOUCH_UP) {
+                    state.view_mode = AURA_VIEW_SHELL;
+                    needs_render = true;
+                    refresh_mode = AURA_REFRESH_FULL;
+                }
+            }
+
+            /* ========================================================= */
             /* VIEW: FULLSCREEN COVER ART                                */
             /* ========================================================= */
-            if (state.view_mode == AURA_VIEW_COVER_FULLSCREEN) {
+            else if (state.view_mode == AURA_VIEW_COVER_FULLSCREEN) {
                 if (ev.type == AURA_TOUCH_UP) {
                     state.view_mode = AURA_VIEW_SHELL;
                     needs_render = true;
@@ -319,13 +441,17 @@ int main(int argc, char **argv) {
                     /* 1. Wi-Fi Button: mx + 24, my + 112, mw - 48, 36 */
                     if (in_rect(ev.x, ev.y, mx + 24, my + 112, mw - 48, 36)) {
                         state.wifi = aura_sync_get_wifi_status();
-                        printf("[settings] Wi-Fi refreshed: %s\n", state.wifi.wifi_ssid);
+                        show_toast(&state, "Antena Wi-Fi actualizada", 2500);
                         needs_render = true;
                     }
                     /* 2. Supabase Sync Button: mx + 24, my + 248, mw - 48, 42 */
                     else if (in_rect(ev.x, ev.y, mx + 24, my + 248, mw - 48, 42)) {
-                        printf("[settings] Triggering Supabase cloud sync...\n");
+                        show_toast(&state, "Sincronizando con Supabase...", 3000);
+                        render_current_view(fb, font_title, font_text, db, &state);
+                        aura_fb_flush_full(fb, AURA_REFRESH_FAST);
+                        
                         aura_sync_pull_from_supabase(&state.sync, db);
+                        show_toast(&state, "Sincronizacion completada", 2500);
                         needs_render = true;
                         refresh_mode = AURA_REFRESH_FULL;
                     }
@@ -334,13 +460,13 @@ int main(int argc, char **argv) {
                         bool autoboot = (access(AUTOSTART_FLAG_PATH, F_OK) == 0);
                         if (autoboot) {
                             remove(AUTOSTART_FLAG_PATH);
-                            printf("[settings] Disabled autoboot.\n");
+                            show_toast(&state, "Autoarranque Desactivado (Kindle original)", 2500);
                         } else {
                             FILE *fp = fopen(AUTOSTART_FLAG_PATH, "w");
                             if (fp) {
                                 fputs("aurabooks_native=1\n", fp);
                                 fclose(fp);
-                                printf("[settings] Enabled pure AuraBooks autoboot.\n");
+                                show_toast(&state, "Autoarranque Puro AuraBooks Activado", 2500);
                             }
                         }
                         needs_render = true;
@@ -357,7 +483,14 @@ int main(int argc, char **argv) {
             /* VIEW: READER ENGINE                                       */
             /* ========================================================= */
             else if (state.view_mode == AURA_VIEW_READER) {
-                if (ev.type == AURA_GESTURE_SWIPE_DOWN) {
+                if (!state.reader_doc) {
+                    /* Missing book file fallback: tap anywhere or [< Volver] returns to library */
+                    if (ev.type == AURA_TOUCH_UP) {
+                        state.view_mode = AURA_VIEW_SHELL;
+                        state.navbar.active_tab = AURA_TAB_LIBRARY;
+                        needs_render = true;
+                    }
+                } else if (ev.type == AURA_GESTURE_SWIPE_DOWN) {
                     /* Return to shell */
                     if (state.reader_doc) {
                         aura_book_t *b = aura_db_get_active_book(db);

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_JPEG
@@ -27,6 +28,7 @@ aura_image_t* aura_image_load(const char *path) {
             "covers",
             "/mnt/us/aurabooks/covers",
             "/mnt/us/covers",
+            "/mnt/us/koreader/cache/covers/large",
             NULL
         };
 
@@ -35,6 +37,31 @@ aura_image_t* aura_image_load(const char *path) {
             snprintf(fallback, sizeof(fallback), "%s/%s", search_dirs[i], base);
             data = stbi_load(fallback, &w, &h, &channels, 1);
             if (data) break;
+        }
+
+        /* Fuzzy search: search directory for any file containing the base book title */
+        if (!data && strlen(base) >= 4) {
+            char search_token[64];
+            snprintf(search_token, sizeof(search_token), "%s", base);
+            char *dot = strrchr(search_token, '.');
+            if (dot) *dot = '\0';
+            if (strlen(search_token) > 16) search_token[16] = '\0';
+
+            for (int i = 0; search_dirs[i] != NULL && !data; i++) {
+                DIR *dir = opendir(search_dirs[i]);
+                if (!dir) continue;
+                struct dirent *ent;
+                while ((ent = readdir(dir)) != NULL) {
+                    if (ent->d_name[0] == '.') continue;
+                    if (strcasestr(ent->d_name, search_token)) {
+                        char full_p[256];
+                        snprintf(full_p, sizeof(full_p), "%s/%s", search_dirs[i], ent->d_name);
+                        data = stbi_load(full_p, &w, &h, &channels, 1);
+                        if (data) break;
+                    }
+                }
+                closedir(dir);
+            }
         }
     }
 
@@ -82,121 +109,104 @@ void aura_image_free(aura_image_t *img) {
     free(img);
 }
 
-void aura_image_draw(aura_fb_t *fb, const aura_image_t *img, int dst_x, int dst_y) {
-    if (!fb || !fb->back_buffer || !img || !img->data) return;
+void aura_image_draw(aura_fb_t *fb, const aura_image_t *img, int x, int y) {
+    if (!fb || !img || !img->data) return;
 
-    for (int y = 0; y < img->height; y++) {
-        int py = dst_y + y;
-        if (py < 0 || py >= SCREEN_HEIGHT) continue;
+    for (int r = 0; r < img->height; r++) {
+        int dst_y = y + r;
+        if (dst_y < 0 || dst_y >= SCREEN_HEIGHT) continue;
 
-        for (int x = 0; x < img->width; x++) {
-            int px = dst_x + x;
-            if (px < 0 || px >= SCREEN_WIDTH) continue;
+        for (int c = 0; c < img->width; c++) {
+            int dst_x = x + c;
+            if (dst_x < 0 || dst_x >= SCREEN_WIDTH) continue;
 
-            fb->back_buffer[py * fb->line_length + px] = img->data[y * img->width + x];
+            uint8_t gray = img->data[r * img->width + c];
+            aura_fb_draw_pixel(fb, dst_x, dst_y, gray);
         }
     }
 }
 
-/* Floyd-Steinberg 16-level grayscale dithering for Kindle E-Ink */
-void aura_image_dither_fs(uint8_t *pixels, int w, int h) {
-    if (!pixels || w <= 0 || h <= 0) return;
+void aura_image_draw_scaled(aura_fb_t *fb, const aura_image_t *img, int x, int y, int target_w, int target_h) {
+    if (!fb || !img || !img->data || target_w <= 0 || target_h <= 0) return;
 
-    /* Allocate buffer with signed error values */
-    int *errors = (int*)calloc(w * h, sizeof(int));
-    if (!errors) return;
+    /* Bilinear/Nearest neighbor scale with 16-level E-Ink quantization */
+    for (int dy = 0; dy < target_h; dy++) {
+        int dst_y = y + dy;
+        if (dst_y < 0 || dst_y >= SCREEN_HEIGHT) continue;
 
-    for (int i = 0; i < w * h; i++) {
-        errors[i] = pixels[i];
+        int src_y = (dy * img->height) / target_h;
+        if (src_y >= img->height) src_y = img->height - 1;
+
+        for (int dx = 0; dx < target_w; dx++) {
+            int dst_x = x + dx;
+            if (dst_x < 0 || dst_x >= SCREEN_WIDTH) continue;
+
+            int src_x = (dx * img->width) / target_w;
+            if (src_x >= img->width) src_x = img->width - 1;
+
+            uint8_t raw = img->data[src_y * img->width + src_x];
+            /* Quantize to 16 E-Ink Pearl levels (0, 17, 34 ... 255) */
+            uint8_t quantized = (raw / 17) * 17;
+            aura_fb_draw_pixel(fb, dst_x, dst_y, quantized);
+        }
+    }
+}
+
+void aura_image_dither_floyd_steinberg(aura_fb_t *fb, const aura_image_t *img, int x, int y, int target_w, int target_h) {
+    if (!fb || !img || !img->data || target_w <= 0 || target_h <= 0) return;
+
+    /* Floyd-Steinberg error diffusion buffer */
+    int *errors = (int*)calloc(target_w * target_h, sizeof(int));
+    if (!errors) {
+        aura_image_draw_scaled(fb, img, x, y, target_w, target_h);
+        return;
     }
 
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            int old_val = errors[y * w + x];
-            if (old_val < 0) old_val = 0;
-            if (old_val > 255) old_val = 255;
+    /* Initialize errors with scaled image luminance */
+    for (int dy = 0; dy < target_h; dy++) {
+        int src_y = (dy * img->height) / target_h;
+        for (int dx = 0; dx < target_w; dx++) {
+            int src_x = (dx * img->width) / target_w;
+            errors[dy * target_w + dx] = (int)img->data[src_y * img->width + src_x];
+        }
+    }
 
-            /* Quantize to 16 equal levels (0, 17, 34, ..., 255) */
-            int new_val = ((old_val + 8) / 17) * 17;
-            if (new_val > 255) new_val = 255;
+    /* Diffusion pass */
+    for (int dy = 0; dy < target_h; dy++) {
+        int dst_y = y + dy;
+        if (dst_y < 0 || dst_y >= SCREEN_HEIGHT) continue;
 
-            pixels[y * w + x] = (uint8_t)new_val;
-            int err = old_val - new_val;
+        for (int dx = 0; dx < target_w; dx++) {
+            int dst_x = x + dx;
+            if (dst_x < 0 || dst_x >= SCREEN_WIDTH) continue;
 
-            /* Distribute error: right (7/16) */
-            if (x + 1 < w) {
-                errors[y * w + (x + 1)] += (err * 7) / 16;
+            int old_px = errors[dy * target_w + dx];
+            if (old_px < 0) old_px = 0;
+            if (old_px > 255) old_px = 255;
+
+            /* Quantize to nearest 16-level step */
+            int new_px = ((old_px + 8) / 17) * 17;
+            if (new_px > 255) new_px = 255;
+
+            aura_fb_draw_pixel(fb, dst_x, dst_y, (uint8_t)new_px);
+
+            int err = old_px - new_px;
+
+            /* Distribute error to neighboring pixels */
+            if (dx + 1 < target_w) {
+                errors[dy * target_w + (dx + 1)] += (err * 7) / 16;
             }
-            /* bottom-left (3/16) */
-            if (y + 1 < h && x - 1 >= 0) {
-                errors[(y + 1) * w + (x - 1)] += (err * 3) / 16;
-            }
-            /* bottom (5/16) */
-            if (y + 1 < h) {
-                errors[(y + 1) * w + x] += (err * 5) / 16;
-            }
-            /* bottom-right (1/16) */
-            if (y + 1 < h && x + 1 < w) {
-                errors[(y + 1) * w + (x + 1)] += (err * 1) / 16;
+            if (dy + 1 < target_h) {
+                if (dx - 1 >= 0) {
+                    errors[(dy + 1) * target_w + (dx - 1)] += (err * 3) / 16;
+                }
+                errors[(dy + 1) * target_w + dx] += (err * 5) / 16;
+                if (dx + 1 < target_w) {
+                    errors[(dy + 1) * target_w + (dx + 1)] += (err * 1) / 16;
+                }
             }
         }
     }
 
     free(errors);
-}
-
-/* Scaled rendering with box-filter averaging and dithering */
-void aura_image_draw_scaled(aura_fb_t *fb, const aura_image_t *img, int dst_x, int dst_y, int dst_w, int dst_h) {
-    if (!fb || !fb->back_buffer || !img || !img->data || dst_w <= 0 || dst_h <= 0) return;
-
-    /* Temporary scaled buffer for dithering */
-    uint8_t *scaled = (uint8_t*)malloc(dst_w * dst_h);
-    if (!scaled) return;
-
-    float x_ratio = (float)img->width / (float)dst_w;
-    float y_ratio = (float)img->height / (float)dst_h;
-
-    for (int y = 0; y < dst_h; y++) {
-        int src_y_start = (int)(y * y_ratio);
-        int src_y_end = (int)((y + 1) * y_ratio);
-        if (src_y_end <= src_y_start) src_y_end = src_y_start + 1;
-        if (src_y_end > img->height) src_y_end = img->height;
-
-        for (int x = 0; x < dst_w; x++) {
-            int src_x_start = (int)(x * x_ratio);
-            int src_x_end = (int)((x + 1) * x_ratio);
-            if (src_x_end <= src_x_start) src_x_end = src_x_start + 1;
-            if (src_x_end > img->width) src_x_end = img->width;
-
-            /* Box-filter area average */
-            uint32_t sum = 0;
-            int count = 0;
-            for (int sy = src_y_start; sy < src_y_end; sy++) {
-                for (int sx = src_x_start; sx < src_x_end; sx++) {
-                    sum += img->data[sy * img->width + sx];
-                    count++;
-                }
-            }
-
-            scaled[y * dst_w + x] = (count > 0) ? (uint8_t)(sum / count) : 0xFF;
-        }
-    }
-
-    /* Apply Floyd-Steinberg dithering for clean E-Ink 16-level presentation */
-    aura_image_dither_fs(scaled, dst_w, dst_h);
-
-    /* Blit onto framebuffer with clipping */
-    for (int y = 0; y < dst_h; y++) {
-        int py = dst_y + y;
-        if (py < 0 || py >= SCREEN_HEIGHT) continue;
-
-        for (int x = 0; x < dst_w; x++) {
-            int px = dst_x + x;
-            if (px < 0 || px >= SCREEN_WIDTH) continue;
-
-            fb->back_buffer[py * fb->line_length + px] = scaled[y * dst_w + x];
-        }
-    }
-
-    free(scaled);
 }

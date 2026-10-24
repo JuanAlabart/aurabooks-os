@@ -38,13 +38,15 @@ typedef struct {
     int press_start_y;
     uint64_t press_start_time_ms;
     bool long_press_fired;
+    int max_raw_x;
+    int max_raw_y;
 } aura_touch_t;
 
 /* Lifecycle */
 aura_touch_t* aura_touch_init(const char *dev_path);
 void          aura_touch_close(aura_touch_t *touch);
 
-/* Non-blocking poll for touch events */
+/* Non-blocking poll for touch events with autocalibrated coordinates */
 bool aura_touch_poll(aura_touch_t *touch, aura_touch_event_t *out_event);
 
 #ifdef __cplusplus

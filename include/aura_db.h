@@ -46,6 +46,9 @@ aura_db_t* aura_db_init(const char *storage_path);
 void       aura_db_close(aura_db_t *db);
 bool       aura_db_save(aura_db_t *db);
 
+/* Local book discovery */
+int        aura_db_scan_documents(aura_db_t *db, const char *docs_dir);
+
 /* Book Operations */
 int         aura_db_get_book_count(const aura_db_t *db);
 aura_book_t* aura_db_get_book(aura_db_t *db, int index);
@@ -54,9 +57,9 @@ void        aura_db_set_rating(aura_db_t *db, const char *filename, int rating);
 void        aura_db_update_progress(aura_db_t *db, const char *filename, int current_page, int total_pages);
 
 /* Quote Operations */
-int          aura_db_get_quote_count(const aura_db_t *db);
+int         aura_db_get_quote_count(const aura_db_t *db);
 aura_quote_t* aura_db_get_quote(aura_db_t *db, int index);
-void         aura_db_add_user_quote(aura_db_t *db, const char *text, const char *author, const char *book);
+void        aura_db_add_user_quote(aura_db_t *db, const char *text, const char *author, const char *book);
 
 #ifdef __cplusplus
 }

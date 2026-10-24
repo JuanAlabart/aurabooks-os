@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/ioctl.h>
 #include <linux/input.h>
 
 #define SWIPE_THRESHOLD_PX   60
@@ -41,6 +42,28 @@ aura_touch_t* aura_touch_init(const char *dev_path) {
     }
 
     touch->fd = fd;
+
+    /* Hardware Autocalibration via EVIOCGABS ioctl (Kindle Touch Neonode zForce) */
+    struct input_absinfo abs_x, abs_y;
+    if (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &abs_x) == 0 && abs_x.maximum > 0) {
+        touch->max_raw_x = abs_x.maximum;
+    } else if (ioctl(fd, EVIOCGABS(ABS_X), &abs_x) == 0 && abs_x.maximum > 0) {
+        touch->max_raw_x = abs_x.maximum;
+    } else {
+        touch->max_raw_x = 600;
+    }
+
+    if (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &abs_y) == 0 && abs_y.maximum > 0) {
+        touch->max_raw_y = abs_y.maximum;
+    } else if (ioctl(fd, EVIOCGABS(ABS_Y), &abs_y) == 0 && abs_y.maximum > 0) {
+        touch->max_raw_y = abs_y.maximum;
+    } else {
+        touch->max_raw_y = 800;
+    }
+
+    printf("[aura_touch] Hardware calibrated range: 0..%d x 0..%d -> 600x800\n",
+           touch->max_raw_x, touch->max_raw_y);
+
     return touch;
 }
 
@@ -79,17 +102,20 @@ bool aura_touch_poll(aura_touch_t *touch, aura_touch_event_t *out_event) {
 
     size_t count = bytes_read / sizeof(struct input_event);
     bool touch_released = false;
-    bool touch_moved = false;
 
     for (size_t i = 0; i < count; i++) {
         if (ev[i].type == EV_ABS) {
-            /* Kindle Touch: ABS_MT_POSITION_X is usually code 0x35 (53) */
+            /* Map raw driver coordinates directly to calibrated 600x800 screen */
             if (ev[i].code == ABS_MT_POSITION_X || ev[i].code == ABS_X) {
-                touch->current_x = ev[i].value;
-                touch_moved = true;
+                int sx = (ev[i].value * 600) / touch->max_raw_x;
+                if (sx < 0) sx = 0;
+                if (sx >= 600) sx = 599;
+                touch->current_x = sx;
             } else if (ev[i].code == ABS_MT_POSITION_Y || ev[i].code == ABS_Y) {
-                touch->current_y = ev[i].value;
-                touch_moved = true;
+                int sy = (ev[i].value * 800) / touch->max_raw_y;
+                if (sy < 0) sy = 0;
+                if (sy >= 800) sy = 799;
+                touch->current_y = sy;
             }
         } else if (ev[i].type == EV_KEY) {
             if (ev[i].code == BTN_TOUCH) {

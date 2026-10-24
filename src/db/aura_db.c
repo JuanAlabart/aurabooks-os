@@ -3,59 +3,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 
 static void seed_default_data(aura_db_t *db) {
-    /* 1. Seed sample books matching Kindle library */
-    db->book_count = 5;
-
-    snprintf(db->books[0].filename, STR_LEN_MED, "Crimen y castigo - Fiodor Dostoyevski.azw3");
-    snprintf(db->books[0].title, STR_LEN_MED, "Crimen y castigo");
-    snprintf(db->books[0].author, STR_LEN_MED, "Fiódor Dostoyevski");
-    snprintf(db->books[0].cover_path, STR_LEN_MED, "/mnt/us/koreader/cache/covers/large/Crimen y castigo (trad. F. Oter - Fiodor Dostoyevski.azw3.jpg");
-    db->books[0].current_page = 142;
-    db->books[0].total_pages = 420;
-    db->books[0].percent = 33;
-    db->books[0].rating = 5;
-
-    snprintf(db->books[1].filename, STR_LEN_MED, "El extranjero - Albert Camus.azw3");
-    snprintf(db->books[1].title, STR_LEN_MED, "El extranjero");
-    snprintf(db->books[1].author, STR_LEN_MED, "Albert Camus");
-    snprintf(db->books[1].cover_path, STR_LEN_MED, "/mnt/us/koreader/cache/covers/large/El extranjero - Albert Camus.azw3.jpg");
-    db->books[1].current_page = 95;
-    db->books[1].total_pages = 120;
-    db->books[1].percent = 79;
-    db->books[1].rating = 5;
-
-    snprintf(db->books[2].filename, STR_LEN_MED, "La metamorfosis.azw");
-    snprintf(db->books[2].title, STR_LEN_MED, "La metamorfosis");
-    snprintf(db->books[2].author, STR_LEN_MED, "Franz Kafka");
-    snprintf(db->books[2].cover_path, STR_LEN_MED, "/mnt/us/koreader/cache/covers/large/La metamorfosis_LQYOPA24R3DGH3OZVDROYP645BFFVYNU.azw.jpg");
-    db->books[2].current_page = 0;
-    db->books[2].total_pages = 85;
-    db->books[2].percent = 0;
-    db->books[2].rating = 4;
-
-    snprintf(db->books[3].filename, STR_LEN_MED, "La sombra del viento - Carlos Ruiz Zafon.azw3");
-    snprintf(db->books[3].title, STR_LEN_MED, "La sombra del viento");
-    snprintf(db->books[3].author, STR_LEN_MED, "Carlos Ruiz Zafón");
-    snprintf(db->books[3].cover_path, STR_LEN_MED, "/mnt/us/koreader/cache/covers/large/La sombra del viento - Carlos Ruiz Zafon.azw3.jpg");
-    db->books[3].current_page = 0;
-    db->books[3].total_pages = 560;
-    db->books[3].percent = 0;
-    db->books[3].rating = 5;
-
-    snprintf(db->books[4].filename, STR_LEN_MED, "El jugador - Fiodor Dostoyevski.azw3");
-    snprintf(db->books[4].title, STR_LEN_MED, "El jugador");
-    snprintf(db->books[4].author, STR_LEN_MED, "Fiódor Dostoyevski");
-    snprintf(db->books[4].cover_path, STR_LEN_MED, "/mnt/us/koreader/cache/covers/large/El jugador - Fiodor Dostoyevski.azw3.jpg");
-    db->books[4].current_page = 0;
-    db->books[4].total_pages = 210;
-    db->books[4].percent = 0;
-    db->books[4].rating = 4;
-
+    /* Clean initial state: zero hardcoded books.
+     * Library is dynamically populated from Supabase sync or documents/ scanning */
+    db->book_count = 0;
     db->active_book_idx = 0;
 
-    /* 2. Seed curated literary quotes */
+    /* Seed curated literary quotes for Zen/Quotes tab */
     db->quote_count = 4;
 
     snprintf(db->quotes[0].text, STR_LEN_LARGE, "El misterio de la existencia humana no radica solo en vivir, sino en encontrar algo por lo que vivir.");
@@ -79,6 +35,74 @@ static void seed_default_data(aura_db_t *db) {
     db->quotes[3].is_user_highlight = true;
 }
 
+int aura_db_scan_documents(aura_db_t *db, const char *docs_dir) {
+    if (!db) return 0;
+    if (!docs_dir) docs_dir = "/mnt/us/documents";
+
+    DIR *dir = opendir(docs_dir);
+    if (!dir) return 0;
+
+    int added = 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL && db->book_count < MAX_BOOKS) {
+        if (ent->d_name[0] == '.') continue;
+
+        /* Check for e-book extensions */
+        const char *ext = strrchr(ent->d_name, '.');
+        if (!ext) continue;
+        if (strcasecmp(ext, ".azw3") != 0 &&
+            strcasecmp(ext, ".azw") != 0 &&
+            strcasecmp(ext, ".mobi") != 0 &&
+            strcasecmp(ext, ".epub") != 0 &&
+            strcasecmp(ext, ".txt") != 0) {
+            continue;
+        }
+
+        /* Check if already in db */
+        bool exists = false;
+        for (int i = 0; i < db->book_count; i++) {
+            if (strcmp(db->books[i].filename, ent->d_name) == 0) {
+                exists = true;
+                break;
+            }
+        }
+        if (exists) continue;
+
+        /* Add new local book */
+        aura_book_t *b = &db->books[db->book_count++];
+        snprintf(b->filename, STR_LEN_MED, "%s", ent->d_name);
+
+        /* Derive clean title from filename */
+        char clean[STR_LEN_MED];
+        snprintf(clean, sizeof(clean), "%s", ent->d_name);
+        char *dot = strrchr(clean, '.');
+        if (dot) *dot = '\0';
+
+        char *sep = strstr(clean, " - ");
+        if (sep) {
+            *sep = '\0';
+            snprintf(b->title, STR_LEN_MED, "%s", clean);
+            snprintf(b->author, STR_LEN_MED, "%s", sep + 3);
+        } else {
+            snprintf(b->title, STR_LEN_MED, "%s", clean);
+            snprintf(b->author, STR_LEN_MED, "Autor Local");
+        }
+
+        snprintf(b->cover_path, STR_LEN_MED, "%s.jpg", ent->d_name);
+        b->current_page = 0;
+        b->total_pages = 250;
+        b->percent = 0;
+        b->rating = 5;
+        added++;
+    }
+    closedir(dir);
+
+    if (added > 0) {
+        aura_db_save(db);
+    }
+    return added;
+}
+
 aura_db_t* aura_db_init(const char *storage_path) {
     aura_db_t *db = (aura_db_t*)calloc(1, sizeof(aura_db_t));
     if (!db) return NULL;
@@ -92,14 +116,16 @@ aura_db_t* aura_db_init(const char *storage_path) {
     if (fp) {
         size_t read_bytes = fread(db, 1, sizeof(aura_db_t), fp);
         fclose(fp);
-        if (read_bytes == sizeof(aura_db_t) && db->book_count > 0) {
+        if (read_bytes == sizeof(aura_db_t) && db->quote_count > 0) {
             printf("[aura_db] Loaded %d books, %d quotes from %s\n", db->book_count, db->quote_count, db->db_path);
+            aura_db_scan_documents(db, "/mnt/us/documents");
             return db;
         }
     }
 
     /* Seed default data on fresh start */
     seed_default_data(db);
+    aura_db_scan_documents(db, "/mnt/us/documents");
     aura_db_save(db);
     return db;
 }
