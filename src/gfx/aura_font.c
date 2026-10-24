@@ -124,10 +124,25 @@ aura_font_t* aura_font_load(const char *font_path, int point_size) {
 
     FILE *fp = fopen(font_path, "rb");
     if (!fp) {
-        /* Try assets/fonts path */
-        char fallback_path[256];
-        snprintf(fallback_path, sizeof(fallback_path), "assets/fonts/%s", font_path);
-        fp = fopen(fallback_path, "rb");
+        /* Search fallback paths for Kindle and simulator */
+        const char *base = strrchr(font_path, '/');
+        if (!base) base = strrchr(font_path, '\\');
+        base = base ? base + 1 : font_path;
+
+        const char *search_dirs[] = {
+            "assets/fonts",
+            "fonts",
+            "/mnt/us/aurabooks/fonts",
+            "/mnt/us/fonts",
+            NULL
+        };
+
+        for (int i = 0; search_dirs[i] != NULL; i++) {
+            char try_path[256];
+            snprintf(try_path, sizeof(try_path), "%s/%s", search_dirs[i], base);
+            fp = fopen(try_path, "rb");
+            if (fp) break;
+        }
     }
 
     if (!fp) {

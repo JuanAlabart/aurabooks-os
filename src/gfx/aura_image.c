@@ -17,13 +17,25 @@ aura_image_t* aura_image_load(const char *path) {
     /* Force 1-channel 8-bit grayscale */
     uint8_t *data = stbi_load(path, &w, &h, &channels, 1);
     if (!data) {
-        /* Check in assets/covers/ with basename */
+        /* Check fallbacks for Kindle and local simulation */
         const char *base = strrchr(path, '/');
         if (!base) base = strrchr(path, '\\');
         base = base ? base + 1 : path;
-        char fallback[256];
-        snprintf(fallback, sizeof(fallback), "assets/covers/%s", base);
-        data = stbi_load(fallback, &w, &h, &channels, 1);
+
+        const char *search_dirs[] = {
+            "assets/covers",
+            "covers",
+            "/mnt/us/aurabooks/covers",
+            "/mnt/us/covers",
+            NULL
+        };
+
+        for (int i = 0; search_dirs[i] != NULL; i++) {
+            char fallback[256];
+            snprintf(fallback, sizeof(fallback), "%s/%s", search_dirs[i], base);
+            data = stbi_load(fallback, &w, &h, &channels, 1);
+            if (data) break;
+        }
     }
 
     if (!data) {

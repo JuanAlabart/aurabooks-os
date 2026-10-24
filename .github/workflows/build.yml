@@ -15,19 +15,20 @@ jobs:
     - name: Checkout Source Code
       uses: actions/checkout@v4
 
-    - name: Install ARM Cross-Compiler Toolchain
+    - name: Install ARM Musl Toolchain (Kernel 2.6+ Compatible)
       run: |
-        sudo apt-get update -qq
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc-arm-linux-gnueabi libc6-dev-armel-cross make
+        curl -sL https://musl.cc/arm-linux-musleabi-cross.tgz | tar -xz
+        echo "$PWD/arm-linux-musleabi-cross/bin" >> $GITHUB_PATH
 
-    - name: Compile AuraBooks Native Binary
+    - name: Compile AuraBooks Native Binary (Static Embedded)
       run: |
-        make CC=arm-linux-gnueabi-gcc CFLAGS="-O2 -march=armv7-a -mtune=cortex-a8 -mfloat-abi=softfp -mfpu=neon -std=gnu11 -Iinclude -D_GNU_SOURCE"
+        make CC=arm-linux-musleabi-gcc CFLAGS="-O2 -march=armv7-a -mtune=cortex-a8 -mfloat-abi=softfp -mfpu=neon -std=gnu11 -Iinclude -D_GNU_SOURCE" LDFLAGS="-static -s -lm"
 
-    - name: Verify Binary Architecture
+    - name: Verify Binary Architecture & Dependencies
       run: |
         file aurabooks_bin
         ls -la aurabooks_bin
+        readelf -l aurabooks_bin || true
 
     - name: Upload Binary Artifact
       uses: actions/upload-artifact@v4
