@@ -24,11 +24,11 @@ void          aura_image_free(aura_image_t *img);
 /* Rendering primitives */
 void aura_image_draw(aura_fb_t *fb, const aura_image_t *img, int dst_x, int dst_y);
 
-/* Scaled rendering with high-quality box filter downsampling and Floyd-Steinberg dithering */
+/* Scaled rendering with high-quality 16-level grayscale quantization */
 void aura_image_draw_scaled(aura_fb_t *fb, const aura_image_t *img, int dst_x, int dst_y, int dst_w, int dst_h);
 
-/* Fast 16-level grayscale quantizer with Floyd-Steinberg error diffusion for E-Ink */
-void aura_image_dither_fs(uint8_t *pixels, int w, int h);
+/* 16-level E-Ink Pearl error-diffusion dithering (Floyd-Steinberg) */
+void aura_image_dither_floyd_steinberg(aura_fb_t *fb, const aura_image_t *img, int x, int y, int target_w, int target_h);
 
 #ifdef __cplusplus
 }
