@@ -15,9 +15,16 @@ jobs:
     - name: Checkout Source Code
       uses: actions/checkout@v4
 
-    - name: Install ARM Musl Toolchain (Kernel 2.6+ Compatible)
+    - name: Install Build Dependencies
       run: |
-        curl -sL https://musl.cc/arm-linux-musleabi-cross.tgz | tar -xz
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends make wget file binutils
+
+    - name: Download & Setup ARM Musl Toolchain
+      run: |
+        echo "Downloading musl ARM toolchain for Kindle..."
+        wget --progress=dot:giga https://musl.cc/arm-linux-musleabi-cross.tgz
+        tar -xzf arm-linux-musleabi-cross.tgz
         echo "$PWD/arm-linux-musleabi-cross/bin" >> $GITHUB_PATH
 
     - name: Compile AuraBooks Native Binary (Static Embedded)
@@ -28,7 +35,7 @@ jobs:
       run: |
         file aurabooks_bin
         ls -la aurabooks_bin
-        readelf -l aurabooks_bin || true
+        readelf -h aurabooks_bin
 
     - name: Upload Binary Artifact
       uses: actions/upload-artifact@v4
