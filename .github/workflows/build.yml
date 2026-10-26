@@ -59,3 +59,13 @@ jobs:
         with:
           name: aurabooks_bin_arm
           path: aurabooks_bin
+
+      - name: Publish Public Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: latest
+          name: AuraBooks Native Latest
+          files: aurabooks_bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
