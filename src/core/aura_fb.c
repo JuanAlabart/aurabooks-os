@@ -23,15 +23,24 @@ struct mxcfb_rect {
     uint32_t height;
 };
 
+struct mxcfb_alt_buffer_data {
+    uint32_t phys_addr;
+    uint32_t width;
+    uint32_t height;
+    struct mxcfb_rect alt_update_region;
+};
+
+/* Amazon Lab126 Kindle Touch (i.MX508 Linux 2.6.31) EPDC update data */
 struct mxcfb_update_data {
     struct mxcfb_rect update_region;
     uint32_t waveform_mode;
     uint32_t update_mode;
     uint32_t update_marker;
+    uint32_t hist_bw_waveform_mode;
+    uint32_t hist_gray_waveform_mode;
     int temp;
-    uint32_t flags;
-    void *dither_mode;
-    void *quant_mode;
+    unsigned int flags;
+    struct mxcfb_alt_buffer_data alt_buffer_data;
 };
 
 /* Waveform mode constants on Kindle Touch */
